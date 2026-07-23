@@ -36,7 +36,7 @@ class Api:
         self.store = Store(APP_DIR / "branch.db")
         self.registry = Registry()
         self.registry.load(self._load_keys())
-        self.window: Optional[webview.Window] = None
+        self._window: Optional[webview.Window] = None
         self.tree_id: Optional[str] = None
         self.tree = Tree()
         # One cancel flag per in-flight response, checked between chunks.
@@ -288,11 +288,11 @@ class Api:
         Copying rather than referencing means a note written months ago still
         resolves after the original is moved or deleted.
         """
-        if not self.window:
+        if not self._window:
             return {"ok": False, "error": "no window"}
         if not self.tree_id:
             return {"ok": False, "error": "no conversation open"}
-        chosen = self.window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True)
+        chosen = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True)
         if not chosen:
             return {"ok": False, "cancelled": True}
 
@@ -446,9 +446,9 @@ class Api:
         if node_id not in self.tree.nodes:
             return {"ok": False, "error": "no such node"}
         markdown = _branch_markdown(self.tree, node_id)
-        if not self.window:
+        if not self._window:
             return {"ok": True, "markdown": markdown}
-        result = self.window.create_file_dialog(
+        result = self._window.create_file_dialog(
             webview.SAVE_DIALOG, save_filename="branch.md"
         )
         if not result:
@@ -471,10 +471,10 @@ class Api:
             "tree": tree.to_dict(),
         }
         blob = json.dumps(payload, indent=2, ensure_ascii=False)
-        if not self.window:
+        if not self._window:
             return {"ok": True, "json": blob}
         safe = "".join(c for c in title if c.isalnum() or c in " -_").strip() or "tree"
-        result = self.window.create_file_dialog(
+        result = self._window.create_file_dialog(
             webview.SAVE_DIALOG, save_filename=f"{safe}.branch.json"
         )
         if not result:
@@ -485,9 +485,9 @@ class Api:
 
     def import_tree(self) -> dict:
         """Load a tree exported by export_tree into a brand-new conversation."""
-        if not self.window:
+        if not self._window:
             return {"ok": False, "error": "no window"}
-        chosen = self.window.create_file_dialog(webview.OPEN_DIALOG)
+        chosen = self._window.create_file_dialog(webview.OPEN_DIALOG)
         if not chosen:
             return {"ok": False, "cancelled": True}
         path = Path(chosen if isinstance(chosen, str) else chosen[0])
@@ -513,12 +513,12 @@ class Api:
     def export_notes(self, session_id: Optional[str] = None) -> dict:
         """Write the current session's notes doc wherever the user points a
         save dialog."""
-        if not self.window:
+        if not self._window:
             return {"ok": False, "error": "no window"}
         if not session_id:
             return {"ok": False, "error": "no session selected"}
         require_id(session_id, field="session_id")
-        result = self.window.create_file_dialog(
+        result = self._window.create_file_dialog(
             webview.SAVE_DIALOG, save_filename="findings.md"
         )
         if not result:
@@ -716,7 +716,7 @@ class Api:
             self._cancels.pop(node_id, None)
 
     def _emit(self, event: str, payload: dict) -> None:
-        if not self.window:
+        if not self._window:
             return
         # This payload carries model output and (via web search) untrusted web
         # content straight into an evaluate_js() call. Interpolating JSON into
@@ -730,7 +730,7 @@ class Api:
         # for byte and JSON.parse sees the exact string.
         data = json.dumps({"event": event, **payload}, ensure_ascii=True)
         b64 = base64.b64encode(data.encode("ascii")).decode("ascii")
-        self.window.evaluate_js(
+        self._window.evaluate_js(
             f'window.__branch && window.__branch.emit(JSON.parse(atob("{b64}")))'
         )
 
@@ -809,7 +809,7 @@ def _run_async(coro):
 def main() -> None:
     api = Api()
     url = str(FRONTEND_DIST) if FRONTEND_DIST.exists() else FRONTEND_DEV
-    api.window = webview.create_window(
+    api._window = webview.create_window(
         "Branch",
         url,
         js_api=api,

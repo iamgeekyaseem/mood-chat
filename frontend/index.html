@@ -8,9 +8,11 @@
       highlight.js output (already escaped), so there is no known injection —
       this caps the blast radius of any future one and blocks exfiltration.
 
-      - script-src 'self': no inline or third-party scripts. The Python bridge
-        reaches the page through the webview host API, not a <script> tag, so it
-        is unaffected. No 'unsafe-eval' — the bridge decodes with atob+JSON.parse.
+      - script-src 'self' 'unsafe-eval': no inline or third-party scripts.
+        'unsafe-eval' is required on macOS/cocoa — pywebview's WKWebView
+        bridge pushes the js_api and streamed events via evaluateJavaScript,
+        which WebKit treats as eval; without it, method injection silently
+        stalls and the app falls back to its browser mock.
       - style-src 'unsafe-inline': React sets inline style attributes (branch
         colours) and Tailwind injects a <style> tag.
       - img-src data:/blob:: file thumbnails are data: URIs.
@@ -21,7 +23,7 @@
       http-equiv="Content-Security-Policy"
       content="
         default-src 'none';
-        script-src 'self';
+        script-src 'self' 'unsafe-eval';
         style-src 'self' 'unsafe-inline';
         img-src 'self' data: blob:;
         font-src 'self';
