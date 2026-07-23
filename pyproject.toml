@@ -1,0 +1,20 @@
+[project]
+name = "branch"
+version = "0.1.0"
+description = "A branching-graph chat client. Ask a follow-up without derailing the thread."
+requires-python = ">=3.12"
+dependencies = [
+    "pywebview>=5.3",
+    "anthropic>=0.69",
+    "openai>=1.60",
+    "httpx>=0.27",
+    "ddgs>=9.14.4",
+    "pillow>=12.3.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+asyncio_mode = "auto"

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Defense in depth. The renderer shows model output and, via web search,
+      untrusted page text. React escapes and the one raw-HTML sink is
+      highlight.js output (already escaped), so there is no known injection —
+      this caps the blast radius of any future one and blocks exfiltration.
+
+      - script-src 'self': no inline or third-party scripts. The Python bridge
+        reaches the page through the webview host API, not a <script> tag, so it
+        is unaffected. No 'unsafe-eval' — the bridge decodes with atob+JSON.parse.
+      - style-src 'unsafe-inline': React sets inline style attributes (branch
+        colours) and Tailwind injects a <style> tag.
+      - img-src data:/blob:: file thumbnails are data: URIs.
+      - connect-src localhost/ws: only for the Vite dev server; harmless under
+        file:// in the packaged build, where the app makes no direct requests.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'none';
+        script-src 'self';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: blob:;
+        font-src 'self';
+        connect-src 'self' ws://localhost:* http://localhost:*;
+        base-uri 'none';
+        form-action 'none';
+      "
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Branch</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

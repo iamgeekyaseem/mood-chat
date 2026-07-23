@@ -1,0 +1,26 @@
+- generic [ref=f4e3]:
+  - navigation [ref=f4e4]:
+    - generic [ref=f4e5]: Branch
+    - button "Chat" [ref=f4e6]
+    - button "Graph" [ref=f4e7]
+    - button "Notes" [ref=f4e8]
+    - button "+ New session" [ref=f4e9]
+  - generic [ref=f4e11]:
+    - complementary [ref=f4e12]:
+      - heading "Map" [level=2] [ref=f4e14]
+      - paragraph [ref=f4e16]: Your conversation graph appears here as it grows.
+      - generic [ref=f4e17]:
+        - generic [ref=f4e18]: 0 nodes
+        - generic [ref=f4e19]: 0 branches
+    - main [ref=f4e20]:
+      - paragraph [ref=f4e23]: Ask something to begin.Highlight any phrase in a reply to branch off it, or to clip it into your notes.
+      - generic [ref=f4e24]:
+        - textbox "Continue the thread… (⌘↵ to send)" [ref=f4e25]:
+          - /placeholder: Continue the thread…  (⌘↵ to send)
+        - generic [ref=f4e26]:
+          - 'button "context: path" [ref=f4e28]'
+          - combobox [ref=f4e29]
+          - button "Send" [disabled] [ref=f4e30]
+    - complementary [ref=f4e31]:
+      - heading "Branches" [level=2] [ref=f4e33]
+      - paragraph [ref=f4e35]: Select any phrase in a reply to ask about it without pulling the main thread off course.
