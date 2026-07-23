@@ -133,9 +133,13 @@ class OllamaProvider(Provider):
 
         if inject:
             # No tool calling: search on the last user turn and hand the
-            # results over as context before answering.
+            # results over as context before answering -- but only when the
+            # question actually looks like it wants outside information. A small
+            # local model can't decide this for itself, and searching on every
+            # turn (a greeting, a rewrite, a maths question) wastes a round-trip
+            # and pollutes the context with irrelevant snippets.
             query = _last_user_text(msgs)
-            if query:
+            if query and _wants_search(query):
                 yield StreamChunk(status=f"searching the web for “{query[:60]}”…")
                 results = await websearch.search(query)
                 block = websearch.as_context(query, results)
@@ -239,6 +243,45 @@ class OllamaProvider(Provider):
         if system:
             chars += len(system)
         return chars // 4
+
+
+# Prompts that clearly operate on text already in the conversation, or are
+# self-contained tasks, gain nothing from a web search.
+_NO_SEARCH_PREFIXES = (
+    "summarize", "summarise", "rewrite", "rephrase", "translate", "fix",
+    "refactor", "explain the above", "explain this", "continue", "shorten",
+    "expand on the above", "tldr", "proofread", "format",
+)
+# Signals that the answer depends on facts outside the model's weights.
+_SEARCH_CUES = (
+    "latest", "current", "today", "yesterday", "recent", "recently", "news",
+    "price", "stock", "release", "released", "version", "who is", "who won",
+    "when did", "when is", "when will", "how much", "weather", "score",
+    "2024", "2025", "2026", "http://", "https://", "www.", ".com", ".org",
+)
+
+
+def _wants_search(query: str) -> bool:
+    """Heuristic relevance gate for the inject path.
+
+    Conservative by design: it only *suppresses* a search when the prompt is a
+    self-contained text task, and it forces one when there is a clear freshness
+    or lookup cue. Anything else defaults to searching, since the user did turn
+    search on for this turn.
+    """
+    q = query.strip().lower()
+    if not q:
+        return False
+    if any(q.startswith(p) for p in _NO_SEARCH_PREFIXES):
+        return False
+    if any(cue in q for cue in _SEARCH_CUES):
+        return True
+    # A very short conversational turn (a greeting, an acknowledgement) is not
+    # worth a search; a real question or request is.
+    words = q.split()
+    if len(words) <= 3 and "?" not in q:
+        return False
+    return True
 
 
 def _last_user_text(msgs: list[dict]) -> str:

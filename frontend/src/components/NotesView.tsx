@@ -6,6 +6,12 @@ interface Props {
   onChange: (content: string) => void;
   onExport: () => void;
   saveState: "saved" | "saving" | "dirty";
+  /** Whether a session is active to write into (false before any message). */
+  hasSession: boolean;
+  /** The active session's opening line, shown when notes are session-scoped. */
+  sessionLabel: string | null;
+  /** Only surface the per-session scope when there's more than one session. */
+  multiSession: boolean;
 }
 
 /**
@@ -16,7 +22,15 @@ interface Props {
  * the content is markdown by contract (it gets saved to a .md file), so the
  * source is the thing worth editing.
  */
-export function NotesView({ content, onChange, onExport, saveState }: Props) {
+export function NotesView({
+  content,
+  onChange,
+  onExport,
+  saveState,
+  hasSession,
+  sessionLabel,
+  multiSession,
+}: Props) {
   const [preview, setPreview] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const atBottom = useRef(true);
@@ -62,20 +76,40 @@ export function NotesView({ content, onChange, onExport, saveState }: Props) {
               : "saved"}
         </span>
 
+        {/* When several sessions live on one canvas, notes are per session —
+            name the one being shown so it's never ambiguous which doc this is. */}
+        {multiSession && sessionLabel && (
+          <span
+            className="max-w-[280px] truncate rounded-md border border-border px-2 py-0.5 text-[11px] text-muted"
+            title={`Notes for this session: “${sessionLabel}”`}
+          >
+            ⑂ {sessionLabel}
+          </span>
+        )}
+
         <button
           onClick={onExport}
-          className="ml-auto rounded-md bg-ink px-3 py-1.5 text-[12px] font-medium text-on-ink"
+          disabled={!hasSession}
+          className="ml-auto rounded-md bg-ink px-3 py-1.5 text-[12px] font-medium text-on-ink disabled:cursor-not-allowed disabled:opacity-40"
         >
           Export .md
         </button>
       </header>
 
-      {content.trim() === "" ? (
+      {!hasSession ? (
         <div className="flex flex-1 items-center justify-center px-6">
           <p className="max-w-[380px] text-center text-[14px] leading-relaxed text-faint">
-            Nothing collected yet. Select text in a reply and choose{" "}
-            <span className="text-text">“+ notes”</span> to start building up
-            your findings here.
+            No session yet. Ask something first — each session on the canvas
+            keeps its own notes, so there's nothing to write into until one
+            exists.
+          </p>
+        </div>
+      ) : content.trim() === "" ? (
+        <div className="flex flex-1 items-center justify-center px-6">
+          <p className="max-w-[380px] text-center text-[14px] leading-relaxed text-faint">
+            Nothing collected in this session yet. Select text in a reply and
+            choose <span className="text-text">“+ notes”</span> to start building
+            up your findings here.
           </p>
         </div>
       ) : preview ? (

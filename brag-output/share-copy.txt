@@ -1,0 +1,1 @@
+Introducing Branch: a chat client where the conversation is a tree, not a line. Ask a follow-up about any word without derailing the thread, fan one question out to three models at once, and pay less because branches share cached context. ⑂

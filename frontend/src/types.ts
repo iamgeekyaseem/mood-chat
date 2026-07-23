@@ -28,8 +28,17 @@ export interface Node {
   clip_count: number;
   /** Assigned once at branch creation; null for plain continuations. */
   color_slot: number | null;
+  /** The reply was cancelled mid-stream; the partial text is kept. */
+  stopped: boolean;
   x: number | null;
   y: number | null;
+}
+
+export interface Template {
+  id: string;
+  title: string;
+  body: string;
+  created_at?: number;
 }
 
 export type Tab = "chat" | "graph" | "notes";
@@ -85,7 +94,15 @@ export interface ProviderInfo {
   supports_search: boolean;
   /** Per-model; local models vary widely in what they can do. */
   capabilities: Record<string, ModelCapabilities>;
+  /** Has a usable credential (or, for Ollama, is running). */
+  configured?: boolean;
   error: string | null;
+}
+
+/** A concrete provider+model choice. */
+export interface ModelChoice {
+  provider: string;
+  model: string;
 }
 
 export type SearchMode = "off" | "on";

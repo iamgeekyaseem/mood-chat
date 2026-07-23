@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import type {
   ContextMode,
   Estimate,
+  ModelChoice,
   ProviderInfo,
   SearchMode,
+  Template,
 } from "../types";
 
 interface Props {
@@ -23,7 +25,12 @@ interface Props {
   onAddFile: () => void;
   status?: string | null;
   onSend: (text: string) => void;
+  /** Fan the same question out to several models, each as its own branch. */
+  onSendMulti: (text: string, targets: ModelChoice[]) => void;
   onCancel?: () => void;
+  templates: Template[];
+  onSaveTemplate: (title: string, body: string) => void;
+  onDeleteTemplate: (id: string) => void;
 }
 
 const MODES: { value: ContextMode; label: string; hint: string }[] = [
@@ -49,23 +56,50 @@ export function Composer({
   onAddFile,
   status,
   onSend,
+  onSendMulti,
   onCancel,
+  templates,
+  onSaveTemplate,
+  onDeleteTemplate,
 }: Props) {
   const [text, setText] = useState("");
   const [showModes, setShowModes] = useState(false);
+  const [showMulti, setShowMulti] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  // Ticked models for a fan-out, keyed "provider:model".
+  const [multi, setMulti] = useState<Set<string>>(new Set());
 
   useEffect(() => setText(""), [anchorText]);
-
-  function submit() {
-    const trimmed = text.trim();
-    if (!trimmed || busy) return;
-    onSend(trimmed);
-    setText("");
-  }
 
   const activeProviders = Object.entries(providers).filter(
     ([, info]) => info.models.length > 0,
   );
+
+  const multiTargets: ModelChoice[] = [...multi].map((k) => {
+    const i = k.indexOf(":");
+    return { provider: k.slice(0, i), model: k.slice(i + 1) };
+  });
+
+  function submit() {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
+    if (multiTargets.length > 0) {
+      onSendMulti(trimmed, multiTargets);
+    } else {
+      onSend(trimmed);
+    }
+    setText("");
+  }
+
+  function toggleMulti(key: string) {
+    setMulti((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   const info = providers[provider];
   const caps = info?.capabilities?.[model];
@@ -171,6 +205,69 @@ export function Composer({
           + file{attachmentCount > 0 ? ` (${attachmentCount})` : ""}
         </button>
 
+        {/* Saved openings: insert a reusable prompt, or bank the current one. */}
+        <div className="relative">
+          <button
+            onClick={() => setShowTemplates((v) => !v)}
+            title="Saved openings — reusable prompts you start from"
+            className="rounded-md border border-border px-2 py-1 text-muted hover:text-text"
+          >
+            ⌸ templates
+          </button>
+          {showTemplates && (
+            <div className="absolute bottom-full z-30 mb-1 max-h-72 w-72 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-xl">
+              {templates.length === 0 && (
+                <div className="px-2 py-1.5 text-[11px] leading-relaxed text-faint">
+                  No templates yet. Type an opening, then save it below.
+                </div>
+              )}
+              {templates.map((t) => (
+                <div
+                  key={t.id}
+                  className="group flex items-center gap-1 rounded-md px-1 hover:bg-sunken"
+                >
+                  <button
+                    onClick={() => {
+                      setText(t.body);
+                      setShowTemplates(false);
+                    }}
+                    className="min-w-0 flex-1 truncate px-1.5 py-1.5 text-left text-[12px] text-text"
+                    title={t.body}
+                  >
+                    {t.title}
+                  </button>
+                  <button
+                    onClick={() => onDeleteTemplate(t.id)}
+                    title="Delete template"
+                    className="shrink-0 px-1 text-[11px] text-faint opacity-0 hover:text-warn group-hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <div className="mt-1 flex items-center gap-1 border-t border-border px-1 pt-1.5">
+                <input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="Save current as…"
+                  className="min-w-0 flex-1 rounded-md border border-border bg-bg px-2 py-1 text-[12px] outline-none placeholder:text-faint focus:border-ink"
+                />
+                <button
+                  onClick={() => {
+                    if (!newTitle.trim() || !text.trim()) return;
+                    onSaveTemplate(newTitle.trim(), text);
+                    setNewTitle("");
+                  }}
+                  disabled={!newTitle.trim() || !text.trim()}
+                  className="shrink-0 rounded-md bg-ink px-2 py-1 text-[11px] font-medium text-on-ink disabled:opacity-40"
+                >
+                  save
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         <select
           value={`${provider}:${model}`}
           onChange={(e) => {
@@ -179,7 +276,13 @@ export function Composer({
             const m = e.target.value.slice(idx + 1);
             onProviderChange(p, m);
           }}
-          className="rounded-md border border-border bg-surface px-2 py-1 text-muted outline-none hover:border-ink"
+          disabled={multiTargets.length > 0}
+          title={
+            multiTargets.length > 0
+              ? "Disabled while comparing models — the fan-out uses the ticked models"
+              : undefined
+          }
+          className="rounded-md border border-border bg-surface px-2 py-1 text-muted outline-none hover:border-ink disabled:opacity-40"
         >
           {activeProviders.map(([name, info]) => (
             <optgroup key={name} label={name}>
@@ -191,6 +294,67 @@ export function Composer({
             </optgroup>
           ))}
         </select>
+
+        {/* Compare models: tick several, and one send fans out to all of them
+            as separate branches. */}
+        <div className="relative">
+          <button
+            onClick={() => setShowMulti((v) => !v)}
+            title="Send this question to several models at once — each answer becomes its own branch"
+            className={`rounded-md border px-2 py-1 ${
+              multiTargets.length > 0
+                ? "border-transparent bg-ink text-on-ink"
+                : "border-border text-muted hover:text-text"
+            }`}
+          >
+            ⑉ compare
+            {multiTargets.length > 0 ? ` (${multiTargets.length})` : ""}
+          </button>
+          {showMulti && (
+            <div className="absolute bottom-full z-30 mb-1 max-h-72 w-64 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-xl">
+              <div className="px-2 py-1.5 text-[11px] leading-relaxed text-faint">
+                Tick models to compare. One send branches to each.
+              </div>
+              {activeProviders.map(([name, info]) => (
+                <div key={name}>
+                  <div className="px-2 pt-1.5 text-[10px] uppercase tracking-wider text-faint">
+                    {name}
+                  </div>
+                  {info.models.map((m) => {
+                    const key = `${name}:${m}`;
+                    const checked = multi.has(key);
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => toggleMulti(key)}
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-sunken"
+                      >
+                        <span
+                          className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border text-[10px] ${
+                            checked
+                              ? "border-ink bg-ink text-on-ink"
+                              : "border-border"
+                          }`}
+                        >
+                          {checked ? "✓" : ""}
+                        </span>
+                        <span className="truncate text-[12px] text-text">{m}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+              {multi.size > 0 && (
+                <button
+                  onClick={() => setMulti(new Set())}
+                  className="mt-1 w-full rounded-md px-2.5 py-1.5 text-left text-[11px] text-faint hover:text-text"
+                >
+                  clear selection
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {estimate && (
           <span
@@ -209,7 +373,11 @@ export function Composer({
           disabled={busy || !text.trim()}
           className="ml-auto rounded-md bg-ink px-3 py-1.5 font-medium text-on-ink transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {busy ? "…" : "Send"}
+          {busy
+            ? "…"
+            : multiTargets.length > 0
+              ? `Send to ${multiTargets.length}`
+              : "Send"}
         </button>
       </div>
     </div>

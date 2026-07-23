@@ -80,6 +80,19 @@ export function branchColor(index: number): BranchColor {
   return index < BRANCH_COLORS.length ? BRANCH_COLORS[index] : OVERFLOW_COLOR;
 }
 
+/**
+ * A distinct dash pattern per branch, on top of colour. Two branch strands that
+ * run near each other — or a viewer who can't rely on hue — are still
+ * distinguishable by their line style: a solid-ish dash, a fine dot, a
+ * dash-dot, a long dash. The pattern is keyed to the same stable slot as the
+ * colour, so a branch's whole strand shares one identity.
+ */
+export const BRANCH_DASH: string[] = ["7 5", "2 5", "12 5 2 5", "11 7"];
+
+export function branchDash(index: number): string {
+  return index < BRANCH_DASH.length ? BRANCH_DASH[index] : "3 4";
+}
+
 export interface ResolvedColor {
   fg: string;
   soft: string;

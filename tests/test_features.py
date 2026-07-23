@@ -105,27 +105,68 @@ def test_collapsed_flag_roundtrips(tmp_path):
 def test_append_note_accumulates(store):
     store.create_tree("t1", "Findings")
 
-    store.append_note("t1", "> first clipping")
-    result = store.append_note("t1", "> second clipping")
+    store.append_note("t1", "s1", "> first clipping")
+    result = store.append_note("t1", "s1", "> second clipping")
 
     assert result == "> first clipping\n\n> second clipping"
-    assert store.get_notes("t1") == result
+    assert store.get_notes("t1", "s1") == result
 
 
 def test_first_append_has_no_leading_blank_lines(store):
     store.create_tree("t1", "Findings")
-    assert store.append_note("t1", "# Findings") == "# Findings"
+    assert store.append_note("t1", "s1", "# Findings") == "# Findings"
+
+
+def test_notes_are_scoped_per_session(store):
+    """Two sessions in one tree keep separate findings docs."""
+    store.create_tree("t1", "x")
+    store.append_note("t1", "sessionA", "note for A")
+    store.append_note("t1", "sessionB", "note for B")
+
+    assert store.get_notes("t1", "sessionA") == "note for A"
+    assert store.get_notes("t1", "sessionB") == "note for B"
+    # An unknown session sees nothing, not another session's notes.
+    assert store.get_notes("t1", "sessionC") == ""
 
 
 def test_notes_survive_reopen(tmp_path):
     s1 = Store(tmp_path / "n.db")
     s1.create_tree("t1", "x")
-    s1.append_note("t1", "kept")
+    s1.append_note("t1", "s1", "kept")
     s1.close()
 
     s2 = Store(tmp_path / "n.db")
-    assert s2.get_notes("t1") == "kept"
+    assert s2.get_notes("t1", "s1") == "kept"
     s2.close()
+
+
+def test_legacy_per_tree_notes_migrate_to_first_session(tmp_path):
+    """An old conversation-wide note lands on that tree's earliest root."""
+    s1 = Store(tmp_path / "m.db")
+    s1.create_tree("t1", "x")
+    # A root and a later node, so there's an earliest root to attach to.
+    t = Tree()
+    root = t.add("user", "opening question")
+    reply = t.add("assistant", "answer", parent_id=root.id)
+    for n in (root, reply):
+        s1.save_node("t1", n)
+    # Simulate a pre-session note written straight into the legacy table.
+    s1.db.execute(
+        "INSERT INTO notes (tree_id, content, updated_at) VALUES (?,?,?)",
+        ("t1", "old findings", 0.0),
+    )
+    s1.db.commit()
+    s1.close()
+
+    # Reopen triggers the one-time migration.
+    s2 = Store(tmp_path / "m.db")
+    assert s2.get_notes("t1", root.id) == "old findings"
+    # And it doesn't re-import over edits on a third open.
+    s2.set_notes("t1", root.id, "edited since")
+    s2.close()
+    s3 = Store(tmp_path / "m.db")
+    assert s3.get_notes("t1", root.id) == "edited since"
+    s3.close()
 
 
 # -- migration --------------------------------------------------------------

@@ -1,0 +1,49 @@
+Branch — your conversation is a tree, not a line.
+
+═══════════════════════════════════════════════════════════════
+
+SHORT (X / social)
+
+Every chat app makes you pick: chase the tangent and lose the thread,
+or stay on track and drop the question.
+
+Branch doesn't. Highlight any phrase in a reply → a ⑂ branch spurs off,
+and the main thread never moves.
+
+Your conversation is a tree, not a line. ⑂
+
+───────────────────────────────────────────────────────────────
+
+MEDIUM (LinkedIn / Show HN)
+
+I kept losing good questions inside long chats — ask the aside, and the
+main thread is derailed; don't, and the question's gone.
+
+So I built Branch: a desktop chat client where a conversation is a tree,
+not a line.
+
+• Highlight any phrase in a reply and branch a side-conversation off it —
+  the main thread stays exactly where it was.
+• Every branch is a coloured strand on a graph canvas. Tangents don't
+  clutter the thread; they fan out into their own lines.
+• Ask one question to three models at once (claude-opus-4-8, gpt-5,
+  gemma3:4b) — each answer is its own branch, side by side.
+• Sibling branches share a cached prompt prefix, so the second and third
+  cost a fraction of the first.
+• No API key required: point it at a local model (gemma3:4b via Ollama)
+  and nothing leaves your machine.
+
+Built with pywebview + a Python backend and a React/Tailwind front end.
+
+Your conversation is a tree, not a line.
+
+───────────────────────────────────────────────────────────────
+
+CAPTION (one-liner)
+
+Highlight a phrase, branch off it, and the main thread never moves.
+Branch — your conversation is a tree, not a line. ⑂
+
+═══════════════════════════════════════════════════════════════
+
+Video: brag.mp4 (22s, 1920×1080, landscape) · Poster: brag.jpg

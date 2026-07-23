@@ -1,0 +1,30 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node / frontend ----
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+npm-debug.log*
+
+# ---- App / tooling artifacts ----
+.playwright-mcp/
+.DS_Store
+*.log
+
+# Local editor / assistant config (may hold machine-specific paths & perms)
+.claude/
+
+# Hyperframes launch-video build artifacts (keep the final mp4/jpg + docs)
+brag-output/composition/renders/
+brag-output/composition/snaps/
+brag-output/composition/node_modules/
+
+# The app writes user data under ~/.branch (outside the repo) — nothing to ignore
+# here, noted for clarity.

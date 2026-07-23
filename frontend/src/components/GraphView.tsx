@@ -14,9 +14,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { resolveBranchColor } from "../colors";
+import { branchDash, resolveBranchColor } from "../colors";
 import { branchRoot, childrenOf, type ChildMap, type NodeMap } from "../tree";
-import type { Attachment, AttachmentLink, Node } from "../types";
+import type { Attachment, AttachmentLink, Node, ProviderInfo } from "../types";
 
 interface Props {
   nodes: NodeMap;
@@ -45,6 +45,10 @@ interface Props {
   busy: boolean;
   status?: string | null;
   targetLabel: string;
+  provider: string;
+  model: string;
+  providers: Record<string, ProviderInfo>;
+  onProviderChange: (provider: string, model: string) => void;
 }
 
 const KIND_GLYPH: Record<Attachment["kind"], string> = {
@@ -66,10 +70,14 @@ interface CardData extends Record<string, unknown> {
   isFocus: boolean;
 }
 
-const COL_W = 320;
+const COL_W = 340;
 // Card height is bounded by the 3-line clamp on the body; this leaves a gap
 // rather than letting neighbours touch.
-const ROW_H = 190;
+const ROW_H = 200;
+// Collision box for a card, a little tighter than the column/row pitch so
+// auto-placed nodes never sit on top of each other or on a dragged node.
+const CARD_W = 280;
+const CARD_H = 168;
 
 /**
  * A conversation card on the canvas. Identity is carried by the branch label
@@ -343,9 +351,16 @@ export function GraphView({
   busy,
   status,
   targetLabel,
+  provider,
+  model,
+  providers,
+  onProviderChange,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
+  const activeProviders = Object.entries(providers).filter(
+    ([, info]) => info.models.length > 0,
+  );
 
   /**
    * Card callbacks, pinned to stable identities.
@@ -400,11 +415,34 @@ export function GraphView({
     // column, and keeping children below their parent, prevents both.
     const nextFreeY: Record<number, number> = {};
 
+    // Every card box already placed (auto or dragged). New auto cards test
+    // against these and slide down until they're clear, so nothing ever lands
+    // completely on top of another node — including a card the user dragged.
+    const placed: { x: number; y: number }[] = [];
+    const collides = (x: number, y: number) =>
+      placed.some(
+        (p) => Math.abs(p.x - x) < CARD_W && Math.abs(p.y - y) < CARD_H,
+      );
+    const resolve = (x: number, y: number) => {
+      let yy = y;
+      let guard = 0;
+      while (collides(x, yy) && guard++ < 200) yy += ROW_H / 2;
+      return yy;
+    };
+
     const colorFor = (n: Node) => {
       const root = branchRoot(nodes, n.id);
       return root?.color_slot != null
         ? resolveBranchColor(root.color_slot, isDark)
         : null;
+    };
+
+    // A branch's whole strand shares one dash pattern (keyed to its colour
+    // slot); the main spine has none (solid). Two nearby branches are then
+    // distinguishable by line style, not colour alone.
+    const dashFor = (n: Node): string | undefined => {
+      const root = branchRoot(nodes, n.id);
+      return root?.color_slot != null ? branchDash(root.color_slot) : undefined;
     };
 
     // Filtering to starred keeps each starred node's ancestors too — a node
@@ -436,17 +474,20 @@ export function GraphView({
       if (!node || !visible(id)) return;
       const color = colorFor(node);
 
-      const y = Math.max(parentY + ROW_H, nextFreeY[col] ?? 0);
-      nextFreeY[col] = y + ROW_H;
+      const dragged = node.x != null && node.y != null;
+      const baseX = dragged ? node.x! : col * COL_W;
+      const baseY = dragged
+        ? node.y!
+        : resolve(col * COL_W, Math.max(parentY + ROW_H, nextFreeY[col] ?? 0));
+      if (!dragged) nextFreeY[col] = baseY + ROW_H;
+      // Reserve this card's box so later cards steer around it.
+      placed.push({ x: baseX, y: baseY });
+      const y = baseY;
 
       laid.push({
         id,
         type: "card",
-        // A dragged position wins; otherwise fall back to auto-layout.
-        position:
-          node.x != null && node.y != null
-            ? { x: node.x, y: node.y }
-            : { x: col * COL_W, y },
+        position: { x: baseX, y: baseY },
         data: {
           node,
           color,
@@ -470,10 +511,9 @@ export function GraphView({
       const forks = kids.filter((k) => k.anchor_text);
 
       for (const k of spine) {
-        // A continuation inside a branch carries that branch's colour, so the
-        // whole strand reads as one coloured thread — you can tell at a glance
-        // whether a node hanging "straight down" is the main line or a branch.
-        // The main spine (no branch colour) stays a neutral grey.
+        // A continuation inside a branch carries that branch's colour AND its
+        // dash pattern, so the whole strand reads as one coloured, styled
+        // thread. The main spine (no branch colour) stays a solid neutral grey.
         const kc = colorFor(k);
         edges.push({
           id: `${id}-${k.id}`,
@@ -482,6 +522,7 @@ export function GraphView({
           style: {
             stroke: kc?.fg ?? "var(--color-border)",
             strokeWidth: kc ? 2.5 : 2,
+            strokeDasharray: dashFor(k),
           },
         });
         visit(k.id, col, y);
@@ -499,12 +540,25 @@ export function GraphView({
           style: {
             stroke: kc?.fg ?? "var(--color-border)",
             strokeWidth: 2,
-            strokeDasharray: "5 3",
+            // Each branch's own dash pattern — colour + line style together.
+            strokeDasharray: dashFor(k) ?? "5 3",
           },
         });
         visit(k.id, col + 1 + forkIndex, y);
       });
     };
+
+    // Pin every manually-dragged card as an obstacle up front — before any
+    // auto card is placed. `visit` reserves boxes as it walks the tree, so a
+    // dragged card only became an obstacle once traversal reached it; a sibling
+    // visited earlier could still land on top of it. Seeding all dragged
+    // positions here means every auto-placed card flows around every dragged
+    // card regardless of tree order, which is the reflow-after-a-drag fix.
+    for (const n of Object.values(nodes)) {
+      if (n.x != null && n.y != null && visible(n.id)) {
+        placed.push({ x: n.x, y: n.y });
+      }
+    }
 
     // Multiple roots: each is an independent session, given its own column
     // band so playground sessions never tangle with each other.
@@ -731,6 +785,35 @@ export function GraphView({
               {busy ? "…" : "Send"}
             </button>
           </div>
+
+          {/* The on-canvas composer picks a model too, so branching from the
+              graph no longer silently uses whatever the Chat tab last set. */}
+          {activeProviders.length > 0 && (
+            <div className="mt-1.5 flex px-1">
+              <select
+                value={`${provider}:${model}`}
+                onChange={(e) => {
+                  const idx = e.target.value.indexOf(":");
+                  onProviderChange(
+                    e.target.value.slice(0, idx),
+                    e.target.value.slice(idx + 1),
+                  );
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+                className="rounded-md border border-border bg-surface px-2 py-1 text-[11px] text-muted outline-none hover:border-ink"
+              >
+                {activeProviders.map(([name, info]) => (
+                  <optgroup key={name} label={name}>
+                    {info.models.map((m) => (
+                      <option key={m} value={`${name}:${m}`}>
+                        {m}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
     </div>

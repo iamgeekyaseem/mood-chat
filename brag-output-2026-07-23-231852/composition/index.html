@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Branch — launch</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #171614; }
+      :root {
+        --bg: #171614;
+        --surface: #1f1e1b;
+        --user: #1c2027;
+        --user-border: #333d4a;
+        --assist: #221f19;
+        --assist-border: #3d3529;
+        --text: #edeae4;
+        --muted: #9a948b;
+        --faint: #6f6a62;
+        --border: #34322d;
+        --ink: #edeae4;
+        --on-ink: #171614;
+        --blue: #3987e5;
+        --amber: #c98500;
+        --magenta: #d55181;
+        --green: #34a853;
+        --star: #d8ab3c;
+        --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --mono: ui-monospace, "SF Mono", Menlo, monospace;
+      }
+      body { font-family: var(--sans); color: var(--text); }
+
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+      .clip { position: absolute; inset: 0; }
+      .bg { position: absolute; inset: 0; background: var(--bg); }
+      .bg::after {
+        /* faint dotted canvas texture, like the app's graph */
+        content: ""; position: absolute; inset: 0;
+        background-image: radial-gradient(#2a2824 1.4px, transparent 1.4px);
+        background-size: 34px 34px; opacity: 0.5;
+      }
+      .wrap { position: absolute; inset: 0; }
+
+      .label { font-size: 20px; letter-spacing: 0.14em; text-transform: uppercase; color: #b0a99f; font-weight: 600; }
+      .bubble { border: 1px solid; border-radius: 16px; padding: 26px 30px; font-size: 34px; line-height: 1.5; }
+      .bubble.user { background: var(--user); border-color: var(--user-border); }
+      .bubble.assist { background: var(--assist); border-color: var(--assist-border); }
+
+      .hl { background: rgba(57,135,229,0.24); border-radius: 6px; padding: 2px 8px; color: var(--text); box-decoration-break: clone; }
+      /* fake text-selection caret bar that sweeps the phrase */
+      .selbar { position: absolute; width: 4px; background: var(--blue); border-radius: 2px; opacity: 0.9; }
+
+      .chip {
+        display: inline-flex; align-items: center; gap: 10px;
+        background: var(--ink); color: var(--on-ink);
+        font-size: 26px; font-weight: 600; padding: 12px 20px; border-radius: 12px;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+        font-family: var(--sans);
+      }
+      .caption {
+        font-size: 40px; font-weight: 500; color: var(--text); letter-spacing: -0.01em;
+      }
+      .caption .dim { color: var(--muted); }
+
+      /* graph pieces */
+      .node {
+        border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+        padding: 18px 22px; width: 360px;
+      }
+      .node .head { display: flex; align-items: center; gap: 12px; font-size: 18px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
+      .node .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+      .node .body { font-size: 26px; color: var(--text); line-height: 1.4; }
+      .node.user { background: var(--user); }
+      .node.assist { background: var(--assist); }
+      .node.branch { border-left-width: 4px; }
+
+      .strand { position: absolute; height: 3px; border-radius: 3px; transform-origin: left center; }
+      .spine { position: absolute; width: 3px; border-radius: 3px; background: var(--faint); transform-origin: top center; }
+
+      /* cost meter (scene 5) */
+      .meter {
+        display: inline-flex; align-items: center; gap: 18px;
+        border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+        padding: 16px 26px; font-family: var(--mono); font-size: 34px; color: var(--text);
+      }
+      .meter .num { min-width: 150px; text-align: right; }
+      .tag-cached {
+        display: inline-flex; align-items: center; gap: 8px;
+        color: var(--star); font-size: 26px; font-weight: 600;
+        border: 1px solid rgba(216,171,60,0.4); border-radius: 999px; padding: 6px 14px;
+      }
+
+      /* model picker (scene 6) */
+      .picker {
+        width: 560px; border: 1px solid var(--border); border-radius: 16px;
+        background: var(--surface); box-shadow: 0 22px 60px rgba(0,0,0,0.5);
+        overflow: hidden;
+      }
+      .picker .grouplabel {
+        font-size: 18px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--faint); font-weight: 700; padding: 16px 24px 8px;
+      }
+      .picker .opt {
+        display: flex; align-items: center; gap: 14px;
+        font-size: 30px; color: var(--text); padding: 14px 24px;
+      }
+      .picker .opt .mono { font-family: var(--mono); }
+      .picker .opt.sel { background: rgba(57,135,229,0.14); }
+      .picker .opt .check { margin-left: auto; color: var(--blue); font-size: 28px; }
+      .picker .divider { height: 1px; background: var(--border); }
+      .local-note {
+        display: inline-flex; align-items: center; gap: 12px;
+        font-size: 30px; color: var(--muted); margin-top: 30px;
+      }
+      .local-note .free { color: var(--green); font-weight: 600; }
+
+      .wordmark { font-size: 138px; font-weight: 700; letter-spacing: -0.03em; color: var(--text); }
+      .wordmark .cut { color: var(--blue); }
+      .tagline { font-size: 46px; color: var(--muted); font-weight: 400; letter-spacing: -0.01em; }
+      .tagline .strong { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="22">
+
+      <!-- ===================== Scene 1 — hook: highlight & branch chip ===================== -->
+      <section id="s1" class="clip" data-start="0" data-duration="4.7" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s1w" class="wrap">
+          <div style="position:absolute; left:410px; top:214px; width:1100px;">
+            <div id="s1-ulabel" class="label" style="margin-bottom:14px;">You</div>
+            <div id="s1-user" class="bubble user" style="margin-bottom:34px;">explain regression to me</div>
+            <div id="s1-alabel" class="label" style="margin-bottom:14px;">Claude&nbsp;Opus&nbsp;4.8</div>
+            <div id="s1-assist" class="bubble assist">
+              A regression fits a line to your data; the
+              <span id="s1-hl" class="hl">p&nbsp;value</span> tells you whether the result is
+              statistically significant.
+            </div>
+          </div>
+          <!-- selection caret sweeps across "p value", then the chip snaps in beside it -->
+          <div id="s1-sel" class="selbar" style="left:740px; top:566px; height:44px;"></div>
+          <div id="s1-chip" class="chip" style="position:absolute; left:735px; top:590px;">⑂ Branch from here</div>
+          <div id="s1-hook" class="caption" style="position:absolute; left:410px; top:820px;">
+            Highlight any phrase. <span class="dim">Branch off it.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 2 — THE shot: the branch spurs off, thread stays ===================== -->
+      <section id="s2" class="clip" data-start="4.5" data-duration="4.4" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s2w" class="wrap">
+          <!-- main thread stays put (left column) — never transformed after settling -->
+          <div id="s2-main" style="position:absolute; left:250px; top:250px;">
+            <div class="node user"><div class="head">You</div><div class="body">explain regression to me</div></div>
+            <div id="s2-spine" class="spine" style="left:179px; top:150px; height:120px;"></div>
+            <div class="node assist" style="margin-top:150px;"><div class="head">Reply</div><div class="body">…the <b>p&nbsp;value</b> tells you whether it's significant.</div></div>
+          </div>
+          <!-- branch strand + card spurs to the right -->
+          <div id="s2-strand" class="strand" style="left:640px; top:470px; width:430px; background:var(--blue); transform:rotate(19deg);"></div>
+          <div id="s2-branch" class="node branch" style="position:absolute; left:1075px; top:470px; border-color:var(--blue); border-left-color:var(--blue);">
+            <div class="head"><span class="dot" style="background:var(--blue)"></span>⑂ p value</div>
+            <div class="body">A p‑value is the probability of a result this extreme if nothing were going on.</div>
+          </div>
+          <div id="s2-cap" class="caption" style="position:absolute; left:250px; top:820px;">
+            The main thread <span class="dim">never moves.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 3 — the graph blooms ===================== -->
+      <section id="s3" class="clip" data-start="8.7" data-duration="4.0" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s3w" class="wrap">
+          <!-- grey main spine, top-left -->
+          <div id="s3-root" class="node user" style="position:absolute; left:250px; top:250px; width:320px;"><div class="head">You</div><div class="body">explain regression</div></div>
+          <div id="s3-spine" class="spine" style="left:410px; top:360px; height:150px;"></div>
+          <div id="s3-reply" class="node assist" style="position:absolute; left:250px; top:510px; width:320px;"><div class="head">Reply</div><div class="body">…the p&nbsp;value, the residuals, the fit…</div></div>
+
+          <!-- three colored branch strands fanning to the right -->
+          <div id="s3-str1" class="strand" style="left:560px; top:600px; width:360px; background:var(--blue);   transform:rotate(-24deg);"></div>
+          <div id="s3-str2" class="strand" style="left:560px; top:600px; width:380px; background:var(--amber);  transform:rotate(2deg);"></div>
+          <div id="s3-str3" class="strand" style="left:560px; top:600px; width:360px; background:var(--magenta);transform:rotate(28deg);"></div>
+
+          <div id="s3-b1" class="node branch" style="position:absolute; left:930px; top:430px; width:320px; border-color:var(--blue);   border-left-color:var(--blue);"><div class="head"><span class="dot" style="background:var(--blue)"></span>⑂ p value</div><div class="body">what does it mean?</div></div>
+          <div id="s3-b2" class="node branch" style="position:absolute; left:960px; top:598px; width:320px; border-color:var(--amber);  border-left-color:var(--amber);"><div class="head"><span class="dot" style="background:var(--amber)"></span>⑂ residuals</div><div class="body">show me the plot</div></div>
+          <div id="s3-b3" class="node branch" style="position:absolute; left:930px; top:766px; width:320px; border-color:var(--magenta);border-left-color:var(--magenta);"><div class="head"><span class="dot" style="background:var(--magenta)"></span>⑂ overfitting</div><div class="body">how do I avoid it?</div></div>
+
+          <div id="s3-cap" class="caption" style="position:absolute; left:1360px; top:470px; width:470px;">
+            Every tangent is <span class="dim">its own branch.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 4 — ask three models at once ===================== -->
+      <section id="s4" class="clip" data-start="12.5" data-duration="4.0" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s4w" class="wrap">
+          <div id="s4-q" class="node user" style="position:absolute; left:790px; top:170px; width:360px;"><div class="head">You</div><div class="body">define it in one line</div></div>
+          <div id="s4-spine" class="spine" style="left:969px; top:280px; height:70px;"></div>
+
+          <!-- three colored strands fan down to three model branches -->
+          <div id="s4-s1" class="strand" style="left:690px; top:360px; width:330px; background:var(--blue);   transform:rotate(150deg);"></div>
+          <div id="s4-s2" class="strand" style="left:960px; top:360px; width:110px; background:var(--amber);  transform:rotate(90deg);"></div>
+          <div id="s4-s3" class="strand" style="left:1230px; top:360px; width:330px; background:var(--magenta);transform:rotate(30deg);"></div>
+
+          <div id="s4-m1" class="node branch" style="position:absolute; left:250px; top:470px; width:400px; border-color:var(--blue);   border-left-color:var(--blue);">
+            <div class="head"><span class="dot" style="background:var(--blue)"></span>⑂ claude-opus-4-8</div>
+            <div class="body">The chance your result is a fluke.</div>
+          </div>
+          <div id="s4-m2" class="node branch" style="position:absolute; left:760px; top:470px; width:400px; border-color:var(--amber);  border-left-color:var(--amber);">
+            <div class="head"><span class="dot" style="background:var(--amber)"></span>⑂ gpt-5</div>
+            <div class="body">Probability the null explains the data.</div>
+          </div>
+          <div id="s4-m3" class="node branch" style="position:absolute; left:1270px; top:470px; width:400px; border-color:var(--magenta);border-left-color:var(--magenta);">
+            <div class="head"><span class="dot" style="background:var(--magenta)"></span>⑂ gemma3:4b</div>
+            <div class="body">How surprising the data is by chance.</div>
+          </div>
+
+          <div id="s4-cap" class="caption" style="position:absolute; left:250px; top:820px;">
+            Ask three models at once. <span class="dim">Compare.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 5 — cheaper by design (cached ticks down) ===================== -->
+      <section id="s5" class="clip" data-start="16.3" data-duration="2.7" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s5w" class="wrap">
+          <!-- two sibling branches share a prefix -->
+          <div class="node branch" style="position:absolute; left:360px; top:330px; width:420px; border-color:var(--blue); border-left-color:var(--blue);">
+            <div class="head"><span class="dot" style="background:var(--blue)"></span>⑂ first branch</div>
+            <div class="body" style="font-family:var(--mono); font-size:24px; color:var(--muted);">↑ 1,280 tokens</div>
+          </div>
+          <div id="s5-sib" class="node branch" style="position:absolute; left:1140px; top:330px; width:420px; border-color:var(--amber); border-left-color:var(--amber);">
+            <div class="head"><span class="dot" style="background:var(--amber)"></span>⑂ sibling branch</div>
+            <div class="body" style="font-family:var(--mono); font-size:24px; color:var(--muted);"><span id="s5-num">1,280</span> → <span id="s5-cached-num" style="color:var(--star);">128</span></div>
+          </div>
+          <div id="s5-tag" class="tag-cached" style="position:absolute; left:1360px; top:470px;">✓ cached · 0.1×</div>
+
+          <div id="s5-cap" class="caption" style="position:absolute; left:0; right:0; top:640px; text-align:center;">
+            Siblings share a cached prefix. <span class="dim">The next branch is a fraction of the cost.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 6 — no API key: local model ===================== -->
+      <section id="s6" class="clip" data-start="18.8" data-duration="1.8" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s6w" class="wrap">
+          <div id="s6-picker" class="picker" style="position:absolute; left:50%; top:250px; transform:translateX(-50%);">
+            <div class="grouplabel">anthropic</div>
+            <div class="opt"><span class="mono">claude-opus-4-8</span></div>
+            <div class="divider"></div>
+            <div class="grouplabel">openai</div>
+            <div class="opt"><span class="mono">gpt-5</span></div>
+            <div class="divider"></div>
+            <div class="grouplabel" style="color:var(--green);">ollama · local</div>
+            <div class="opt sel"><span class="mono">gemma3:4b</span><span class="check">✓</span></div>
+          </div>
+          <div id="s6-note" class="local-note" style="position:absolute; left:0; right:0; top:730px; justify-content:center;">
+            <span class="free">Free, fully local.</span> No API key — nothing leaves your machine.
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 7 — punchline / wordmark ===================== -->
+      <section id="s7" class="clip" data-start="20.4" data-duration="1.6" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s7w" class="wrap">
+          <div id="s7-mark" class="wordmark" style="position:absolute; left:0; right:0; top:400px; text-align:center;">Branch<span class="cut">⑂</span></div>
+          <div id="s7-tag" class="tagline" style="position:absolute; left:0; right:0; top:590px; text-align:center;">Your conversation is a <span class="strong">tree</span>, not a line.</div>
+        </div>
+      </section>
+
+      <!-- audio bed -->
+      <audio id="music" data-start="0" data-duration="22" data-track-index="9" data-volume="0.5" src="assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      const E = "power3.out";
+      const EO = "power2.out";
+
+      // ---- Scene 1 (0.0–4.7): highlight & branch chip ----
+      // The first 3 seconds carry the whole idea, so this hold is unhurried.
+      tl.fromTo("#s1w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 0.05);
+      tl.from("#s1-ulabel", { y: 18, opacity: 0, duration: 0.4, ease: E }, 0.2);
+      tl.from("#s1-user", { y: 22, opacity: 0, duration: 0.45, ease: E }, 0.35);
+      tl.from("#s1-alabel", { y: 18, opacity: 0, duration: 0.4, ease: E }, 0.75);
+      tl.from("#s1-assist", { y: 22, opacity: 0, duration: 0.5, ease: E }, 0.9);
+      // selection caret sweeps across the phrase, then the highlight fills
+      tl.fromTo("#s1-sel", { width: 4, x: 0 }, { width: 150, duration: 0.5, ease: "power1.inOut" }, 1.6);
+      tl.from("#s1-hl", { backgroundColor: "rgba(57,135,229,0)", duration: 0.45, ease: EO }, 1.7);
+      tl.to("#s1-sel", { opacity: 0, duration: 0.3, ease: EO }, 2.2);
+      // chip snaps in — the one permitted "snap", a UI affordance (not text)
+      tl.from("#s1-chip", { scale: 0.72, opacity: 0, y: 6, duration: 0.32, ease: "back.out(1.4)" }, 2.35);
+      tl.from("#s1-hook", { y: 22, opacity: 0, duration: 0.55, ease: E }, 2.9);
+      tl.to("#s1w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 4.4);
+
+      // ---- Scene 2 (4.5–8.9): THE shot — branch spurs off, thread pinned ----
+      // Longest hold. The main thread never receives a transform after it settles.
+      tl.fromTo("#s2w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 4.55);
+      tl.from("#s2-main", { y: 18, opacity: 0, duration: 0.5, ease: E }, 4.7);
+      tl.from("#s2-spine", { scaleY: 0, duration: 0.4, ease: E }, 5.0);
+      // let it breathe, then the strand draws out slowly and the card arrives
+      tl.from("#s2-strand", { scaleX: 0, duration: 0.7, ease: "power2.inOut" }, 5.7);
+      tl.from("#s2-branch", { x: -28, opacity: 0, duration: 0.6, ease: E }, 6.35);
+      tl.from("#s2-cap", { y: 22, opacity: 0, duration: 0.6, ease: E }, 6.95);
+      tl.to("#s2w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 8.55);
+
+      // ---- Scene 3 (8.7–12.7): the graph blooms ----
+      tl.fromTo("#s3w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 8.75);
+      tl.from("#s3-root", { y: 16, opacity: 0, duration: 0.4, ease: E }, 8.85);
+      tl.from("#s3-spine", { scaleY: 0, duration: 0.35, ease: E }, 9.05);
+      tl.from("#s3-reply", { y: 16, opacity: 0, duration: 0.4, ease: E }, 9.2);
+      // three strands + branches bloom, staggered and calm
+      tl.from("#s3-str1", { scaleX: 0, duration: 0.45, ease: EO }, 9.6);
+      tl.from("#s3-b1", { x: -22, opacity: 0, duration: 0.45, ease: E }, 9.8);
+      tl.from("#s3-str2", { scaleX: 0, duration: 0.45, ease: EO }, 10.1);
+      tl.from("#s3-b2", { x: -22, opacity: 0, duration: 0.45, ease: E }, 10.3);
+      tl.from("#s3-str3", { scaleX: 0, duration: 0.45, ease: EO }, 10.6);
+      tl.from("#s3-b3", { x: -22, opacity: 0, duration: 0.45, ease: E }, 10.8);
+      tl.from("#s3-cap", { y: 20, opacity: 0, duration: 0.6, ease: E }, 11.2);
+      tl.to("#s3w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 12.35);
+
+      // ---- Scene 4 (12.5–16.5): three models ----
+      tl.fromTo("#s4w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 12.55);
+      tl.from("#s4-q", { y: 16, opacity: 0, duration: 0.4, ease: E }, 12.7);
+      tl.from("#s4-spine", { scaleY: 0, duration: 0.3, ease: E }, 12.95);
+      tl.from("#s4-s1", { scaleX: 0, duration: 0.36, ease: EO }, 13.2);
+      tl.from("#s4-m1", { y: 22, opacity: 0, duration: 0.44, ease: E }, 13.4);
+      tl.from("#s4-s2", { scaleX: 0, duration: 0.36, ease: EO }, 13.75);
+      tl.from("#s4-m2", { y: 22, opacity: 0, duration: 0.44, ease: E }, 13.95);
+      tl.from("#s4-s3", { scaleX: 0, duration: 0.36, ease: EO }, 14.3);
+      tl.from("#s4-m3", { y: 22, opacity: 0, duration: 0.44, ease: E }, 14.5);
+      tl.from("#s4-cap", { y: 22, opacity: 0, duration: 0.6, ease: E }, 15.1);
+      tl.to("#s4w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 16.15);
+
+      // ---- Scene 5 (16.3–19.0): cheaper by design, cached ticks down ----
+      tl.fromTo("#s5w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 16.35);
+      tl.from("#s5-cap", { y: 18, opacity: 0, duration: 0.5, ease: E }, 16.55);
+      // the sibling's effective cost counts down to the cached fraction
+      const counter = { v: 1280 };
+      const numEl = document.getElementById("s5-cached-num");
+      tl.set("#s5-cached-num", { textContent: "1,280" }, 16.9);
+      tl.to(counter, {
+        v: 128, duration: 0.9, ease: "power2.inOut",
+        onUpdate: () => { if (numEl) numEl.textContent = Math.round(counter.v).toLocaleString(); },
+      }, 16.95);
+      tl.from("#s5-tag", { scale: 0.9, opacity: 0, duration: 0.4, ease: EO }, 17.9);
+      tl.to("#s5w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 18.65);
+
+      // ---- Scene 6 (18.8–20.6): no API key, local model ----
+      tl.fromTo("#s6w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 18.85);
+      tl.from("#s6-picker", { y: 20, opacity: 0, duration: 0.5, ease: E }, 18.95);
+      tl.from("#s6-note", { y: 18, opacity: 0, duration: 0.5, ease: E }, 19.35);
+      tl.to("#s6w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 20.25);
+
+      // ---- Scene 7 (20.4–22.0): punchline ----
+      tl.fromTo("#s7w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 20.45);
+      // wordmark fades and settles — no overshoot on the type
+      tl.from("#s7-mark", { y: 20, opacity: 0, duration: 0.6, ease: E }, 20.55);
+      tl.from("#s7-tag", { y: 18, opacity: 0, duration: 0.6, ease: E }, 21.0);
+      // music fades under the wordmark
+      tl.to("#music", { volume: 0, duration: 1.3, ease: "power2.in" }, 20.6);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

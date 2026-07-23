@@ -1,6 +1,51 @@
-# Branch
+# Branch ⑂
 
-A chat client where the conversation is a tree, not a line.
+**A chat client where the conversation is a tree, not a line.**
+
+Ask an LLM about statistics and it mentions "p-value" in passing. You want to
+know what that means — but asking derails the thread, and asking in a new chat
+throws away the context that made the question worth asking. So you *branch*:
+highlight the phrase, ask about it in a side thread, and the main conversation
+stays exactly where you left it.
+
+<p>
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-blue">
+  <img alt="React + TypeScript" src="https://img.shields.io/badge/frontend-React%20%2B%20TS-0ea5e9">
+  <img alt="pywebview" src="https://img.shields.io/badge/shell-pywebview-1f6feb">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green">
+</p>
+
+## What it does
+
+- **Branch any phrase.** Highlight a word in a reply and ask about it in a side
+  thread — the main conversation never moves.
+- **Cheaper by design.** Branches send only the path from the root, and sibling
+  branches share a byte-identical prefix, so [prompt caching](#why-it-costs-less)
+  compounds the saving.
+- **Three views of one tree.** A linear **Chat**, a pannable **Graph** canvas
+  (each branch its own colour *and* dash pattern), and a **Notes** doc you clip
+  findings into.
+- **Ask several models at once.** Fan one question out to multiple models —
+  Claude, GPT, or a local Ollama model — and each answer becomes its own branch
+  to compare side by side.
+- **Bring your own model.** Claude and OpenAI via API key, or run entirely free
+  and offline on a local [Ollama](https://ollama.com) model. Pick per session,
+  or per branch.
+- **Attach files, search everything, keep it local.** Drag images/text onto the
+  canvas and connect them to a question; full-text search (⌘K) across every
+  message; all data stays on your machine.
+
+> A 20-second look at it lives in [`brag-output/brag.mp4`](brag-output/brag.mp4).
+
+## Table of contents
+
+- [Quick start](#quick-start--how-to-run-it-right-now)
+- [Running free on a local model](#running-it-entirely-on-a-local-model)
+- [Why it costs less](#why-it-costs-less)
+- [The three tabs](#the-three-tabs)
+- [Files](#files) · [Web search](#web-search) · [Colour](#colour)
+- [Tests](#tests) · [Layout of the code](#layout-of-the-code)
+- [What&#39;s next](#whats-next) · [Contributing](#contributing) · [License](#license)
 
 ---
 
@@ -30,6 +75,7 @@ deactivate                   # when done
 ```
 
 Both routes run the same interpreter. `uv run` just skips the activation step.
+
 </details>
 
 **The file to run is `backend/app.py`.** It opens the pywebview window and
@@ -95,11 +141,11 @@ Two constraints this design has to respect:
 
 Chosen per branch, from the composer:
 
-| Mode | What gets sent |
-| --- | --- |
-| `minimal` | The highlighted phrase and the message it came from |
-| `path` | Every ancestor from root to the branch point (default) |
-| `full` | The entire tree, siblings included |
+| Mode        | What gets sent                                         |
+| ----------- | ------------------------------------------------------ |
+| `minimal` | The highlighted phrase and the message it came from    |
+| `path`    | Every ancestor from root to the branch point (default) |
+| `full`    | The entire tree, siblings included                     |
 
 ## Conversations
 
@@ -148,10 +194,10 @@ carrying their source branch; edit in place, preview, export to `.md`.
 
 Two ways in, with different rules:
 
-| Action | Limit | Marker |
-| --- | --- | --- |
-| `+ notes` on a message — adds the whole thing | **once** | control becomes `in notes ✓`, message gets a gold rule |
-| select text → `+ Notes` — adds an excerpt | unlimited | `✎ n` count on the message |
+| Action                                           | Limit          | Marker                                                   |
+| ------------------------------------------------ | -------------- | -------------------------------------------------------- |
+| `+ notes` on a message — adds the whole thing | **once** | control becomes`in notes ✓`, message gets a gold rule |
+| select text →`+ Notes` — adds an excerpt     | unlimited      | `✎ n` count on the message                            |
 
 The whole-message cap exists because a second add would append identical text.
 Excerpts stay unlimited because pulling three different sentences out of one
@@ -171,12 +217,12 @@ asked at or below that point. Delete an edge to unlink; the file stays.
 Files are **copied, not referenced**, so a conversation still resolves after the
 original is moved or deleted.
 
-| Type | Card preview | What the model gets |
-| --- | --- | --- |
-| png / jpeg / gif / webp | downscaled thumbnail | the image, if the model has vision |
-| text, markdown, csv, json, source code | first few lines | contents inlined, truncated at 20k chars |
-| pdf | none — says so | a note naming the file and saying it couldn't be read |
-| anything else | none — says so | same |
+| Type                                   | Card preview         | What the model gets                                   |
+| -------------------------------------- | -------------------- | ----------------------------------------------------- |
+| png / jpeg / gif / webp                | downscaled thumbnail | the image, if the model has vision                    |
+| text, markdown, csv, json, source code | first few lines      | contents inlined, truncated at 20k chars              |
+| pdf                                    | none — says so      | a note naming the file and saying it couldn't be read |
+| anything else                          | none — says so      | same                                                  |
 
 PDFs get no thumbnail because rendering a page needs poppler or an equivalent
 native dependency; showing a placeholder that implied otherwise would be worse
@@ -195,9 +241,9 @@ to one branch never invalidates the prefix its siblings share.
 The `web` toggle in the composer. Two paths, picked automatically from what the
 model can do:
 
-| Model can | Path | Behaviour |
-| --- | --- | --- |
-| call tools | **tool** | the model decides when to search |
+| Model can      | Path             | Behaviour                                            |
+| -------------- | ---------------- | ---------------------------------------------------- |
+| call tools     | **tool**   | the model decides when to search                     |
 | not call tools | **inject** | we search first and hand the results over as context |
 
 The inject path exists because most small local models can't call tools — and
@@ -219,10 +265,10 @@ The branch palette is four hues, validated all-pairs in both light and dark
 against this app's surfaces with the `dataviz` skill's validator. Two results
 constrain how it may be used:
 
-| Mode | Finding | Consequence |
-| --- | --- | --- |
-| light | yellow 2.08:1, magenta 2.58:1 vs surface | below 3:1 — "relief" required |
-| dark | green↔yellow CVD ΔE 6.9 | inside the 6–8 warn band — legal only with secondary encoding |
+| Mode  | Finding                                  | Consequence                                                     |
+| ----- | ---------------------------------------- | --------------------------------------------------------------- |
+| light | yellow 2.08:1, magenta 2.58:1 vs surface | below 3:1 — "relief" required                                  |
+| dark  | green↔yellow CVD ΔE 6.9                | inside the 6–8 warn band — legal only with secondary encoding |
 
 Both are discharged by one rule, enforced in the components: **a branch is never
 rendered as colour alone — its anchor text always shows.**
@@ -277,12 +323,12 @@ curl -s http://localhost:11434/api/tags
 
 Which model you pull decides which features work, so pick against the table:
 
-| Model | Size | Vision | Tools | Good for |
-| --- | --- | --- | --- | --- |
-| `gemma3:4b` | 3.3 GB | ✅ | ❌ | images + branching; search via the inject path |
-| `qwen3:8b` | ~5 GB | ❌ | ✅ | model-driven web search |
-| `llama3.2-vision:11b` | ~7.8 GB | ✅ | ❌ | better image reading |
-| `qwen2.5:7b` | ~4.7 GB | ❌ | ✅ | tool calling on modest hardware |
+| Model                   | Size    | Vision | Tools | Good for                                       |
+| ----------------------- | ------- | ------ | ----- | ---------------------------------------------- |
+| `gemma3:4b`           | 3.3 GB  | ✅     | ❌    | images + branching; search via the inject path |
+| `qwen3:8b`            | ~5 GB   | ❌     | ✅    | model-driven web search                        |
+| `llama3.2-vision:11b` | ~7.8 GB | ✅     | ❌    | better image reading                           |
+| `qwen2.5:7b`          | ~4.7 GB | ❌     | ✅    | tool calling on modest hardware                |
 
 ```sh
 ollama pull gemma3:4b
@@ -348,12 +394,12 @@ asyncio.run(main())
 
 ### Troubleshooting
 
-| Symptom | Cause |
-| --- | --- |
-| ollama group missing from the dropdown | `ollama serve` isn't running — the app greys it out rather than erroring |
-| `does not support tools` | expected on gemma3; search silently uses the inject path instead |
-| image attached but ignored | the model has no `vision` capability — the reply will say so |
-| web search returns nothing | no network, or `ddgs` is blocked; the model is told the search was empty rather than being left to invent an answer |
+| Symptom                                | Cause                                                                                                                |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| ollama group missing from the dropdown | `ollama serve` isn't running — the app greys it out rather than erroring                                          |
+| `does not support tools`             | expected on gemma3; search silently uses the inject path instead                                                     |
+| image attached but ignored             | the model has no`vision` capability — the reply will say so                                                       |
+| web search returns nothing             | no network, or`ddgs` is blocked; the model is told the search was empty rather than being left to invent an answer |
 
 ### API keys
 
@@ -394,20 +440,63 @@ frontend/src/
 
 ## Other controls
 
-| Control | Where | What it does |
-| --- | --- | --- |
-| ⌕ / ⌘K | top bar | Full-text search over every message; scope to this chat or all. Arrow + Enter to jump. |
-| ⚙ | top bar | API keys. Write-only — saved keys are never read back into the form. |
-| ☾ / ☀ | top bar | Theme override; follows the OS until you set it. |
-| ■ Stop | top bar, while streaming | Cancels the response. Whatever arrived is kept. |
-| ★ Starred only | Graph toolbar | Filters to starred nodes **and their ancestors** — a starred node with its lineage cut away loses the context that made it worth starring. |
-| ⤢ Reset layout | Graph toolbar | Snaps every dragged card back to the automatic layout. Nothing is lost. |
+| Control         | Where                    | What it does                                                                                                                                     |
+| --------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ⌕ / ⌘K        | top bar                  | Full-text search over every message; scope to this chat or all. Arrow + Enter to jump.                                                           |
+| ⚙              | top bar                  | API keys. Write-only — saved keys are never read back into the form.                                                                            |
+| ☾ / ☀         | top bar                  | Theme override; follows the OS until you set it.                                                                                                 |
+| ■ Stop         | top bar, while streaming | Cancels the response. Whatever arrived is kept.                                                                                                  |
+| ★ Starred only | Graph toolbar            | Filters to starred nodes**and their ancestors** — a starred node with its lineage cut away loses the context that made it worth starring. |
+| ⤢ Reset layout | Graph toolbar            | Snaps every dragged card back to the automatic layout. Nothing is lost.                                                                          |
 
-**On the graph, a branch is one continuous coloured strand** — the fork edge is
-dashed, everything below it is solid in the same colour. The main thread stays
-neutral grey. So a message hanging "straight down" from a branch reads as part
-of that branch, not the main line.
+**On the graph, a branch is one continuous strand with its own colour _and_ dash
+pattern** — a solid-ish dash, fine dots, or a dash-dot, keyed to the same slot
+as the colour. Two branches running near each other are distinguishable by line
+style, not colour alone (and it survives colour-blindness). The main thread
+stays a solid neutral grey. Auto-layout keeps cards from overlapping, and
+**Reset layout** snaps everything back if you've dragged things around.
 
 ## What's next
 
 See [ROADMAP.md](ROADMAP.md) for planned features and the known rough edges.
+
+## Architecture
+
+```
+Python backend  ──JS bridge──▶  React frontend  ──pywebview──▶  native window
+  (providers,       (streamed        (Chat / Graph / Notes,
+   SQLite, tree)     via events)      React Flow canvas)
+```
+
+- **Backend** (`backend/`) — the conversation tree, SQLite persistence with
+  FTS5 search, attachment handling, and a provider abstraction over Claude
+  (with prompt caching), OpenAI, and local Ollama.
+- **Frontend** (`frontend/`) — React + TypeScript + Tailwind, React Flow for
+  the graph canvas. Talks to Python over pywebview's JS bridge; a mock keeps it
+  developable in a plain browser.
+- **Security** — the JS↔Python boundary validates every id, the bridge uses an
+  injection-proof base64 channel, and there's a CSP. See [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+1. Fork and branch off `main`.
+2. Backend changes: keep the test suite green — `uv run pytest tests/ -q`.
+3. Frontend changes: `cd frontend && npm run build` must pass (it type-checks).
+4. Keep the comment style and altitude of the surrounding code; explain the
+   *why*, not the *what*.
+
+There's no CLA and no bureaucracy — it's a personal project shared in the open.
+
+## License
+
+[MIT](LICENSE) © 2026 Aseem Gupta. Do whatever you like with it; no warranty.
+
+## Acknowledgements
+
+- [pywebview](https://pywebview.flowlade.com/) for the native shell.
+- [React Flow](https://reactflow.dev/) for the graph canvas.
+- [Ollama](https://ollama.com/) for free local models.
+- The branch-colour palette is validated for colour-blind safety with the
+  `dataviz` skill's checker; the launch video was built with Hyperframes.

@@ -56,6 +56,10 @@ class Node:
 
     usage: Usage = field(default_factory=Usage)
     collapsed: bool = False
+    # An assistant reply the user cancelled mid-stream. The partial text is
+    # kept, and this flag lets the UI mark it as unfinished rather than passing
+    # a truncated answer off as complete.
+    stopped: bool = False
 
     # Canvas affordances.
     starred: bool = False

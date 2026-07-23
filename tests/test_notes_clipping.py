@@ -81,10 +81,10 @@ def test_pre_migration_rows_default_to_unclipped(tmp_path):
 
 def test_appending_twice_would_duplicate_which_is_what_noted_prevents(store):
     """The reason whole-message clips are capped at one."""
-    store.append_note("t1", "> the same reply")
-    store.append_note("t1", "> the same reply")
+    store.append_note("t1", "s1", "> the same reply")
+    store.append_note("t1", "s1", "> the same reply")
 
-    assert store.get_notes("t1").count("the same reply") == 2
+    assert store.get_notes("t1", "s1").count("the same reply") == 2
 
 
 # -- previews ---------------------------------------------------------------

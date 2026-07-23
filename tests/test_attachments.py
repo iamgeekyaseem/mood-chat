@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 import pytest
 
 import websearch
-from attachments import Attachment, guess_mime, to_blocks
+from attachments import Attachment, guess_mime, preview, to_blocks
 from context import assemble
 from store import Store
 from tree import Tree
@@ -109,6 +109,33 @@ def test_missing_file_is_reported(tmp_path):
         size=0, created_at=time.time(),
     )
     assert "missing" in to_blocks(att)[0]["text"]
+
+
+# -- pdf --------------------------------------------------------------------
+
+
+def test_pdf_without_text_layer_is_named_not_faked(tmp_path):
+    """A scanned/imageless PDF has no extractable text; we say so rather than
+    pretending the model received its contents."""
+    p = tmp_path / "scan.pdf"
+    # Not a real PDF body: pypdf extracts nothing, exercising the fallback.
+    p.write_bytes(b"%PDF-1.4\n%not a real page\n%%EOF")
+    att = att_for(p)
+    assert att.kind == "pdf"
+
+    blocks = to_blocks(att)
+    assert blocks[0]["type"] == "text"
+    assert "no extractable text" in blocks[0]["text"]
+    # Preview degrades to a note, never a false snippet.
+    assert preview(att)["type"] == "none"
+
+
+def test_pdf_text_extraction_helper_is_graceful_on_garbage(tmp_path):
+    from attachments import _pdf_text
+
+    p = tmp_path / "bad.pdf"
+    p.write_bytes(b"not a pdf at all")
+    assert _pdf_text(p) is None
 
 
 # -- context assembly -------------------------------------------------------

@@ -3,9 +3,11 @@ import { api, onStream, ready } from "./bridge";
 import { resolveBranchColor } from "./colors";
 import { BranchRail } from "./components/BranchRail";
 import { Composer } from "./components/Composer";
+import { DiffView } from "./components/DiffView";
 import { GraphView } from "./components/GraphView";
 import { Message } from "./components/Message";
 import { Minimap } from "./components/Minimap";
+import { ModelPicker } from "./components/ModelPicker";
 import { NotesView } from "./components/NotesView";
 import { SearchPalette } from "./components/SearchPalette";
 import { Sessions } from "./components/Sessions";
@@ -29,6 +31,7 @@ import type {
   ProviderInfo,
   SearchMode,
   Tab,
+  Template,
   TreeSummary,
 } from "./types";
 
@@ -48,10 +51,26 @@ export default function App() {
   const [draft, setDraft] = useState<DraftBranch | null>(null);
   const [mode, setMode] = useState<ContextMode>("path");
   const [providers, setProviders] = useState<Record<string, ProviderInfo>>({});
-  const [provider, setProvider] = useState("anthropic");
-  const [model, setModel] = useState("claude-opus-4-8");
+  // Seed from the last-used choice so the picker and composer open on it.
+  const lastChoice = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("branch.model");
+      return raw ? (JSON.parse(raw) as { provider: string; model: string }) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+  const [provider, setProvider] = useState(lastChoice?.provider ?? "anthropic");
+  const [model, setModel] = useState(lastChoice?.model ?? "claude-opus-4-8");
+  // Cheap-model routing: the default model for side branches, as
+  // "provider/model" ("" = use the main thread's model). Kept server-side so
+  // it survives restarts.
+  const [branchModel, setBranchModel] = useState("");
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
-  const [streamingId, setStreamingId] = useState<string | null>(null);
+  // A set, not a single id: a multi-model fan-out has several replies streaming
+  // at once, and tracking only one left the others looking frozen.
+  const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   const [notes, setNotes] = useState("");
@@ -71,9 +90,11 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
 
   const [searchMode, setSearchMode] = useState<SearchMode>("off");
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [links, setLinks] = useState<AttachmentLink[]>([]);
   const [status, setStatus] = useState<string | null>(null);
@@ -86,7 +107,13 @@ export default function App() {
     (async () => {
       await ready();
       try {
-        setProviders(await api.providers());
+        const provs = await api.providers();
+        setProviders(provs);
+        // Ask which model to use for this session, so the active model is a
+        // conscious choice rather than a default that might have no key.
+        if (Object.values(provs).some((p) => p.models.length > 0)) {
+          setShowModelPicker(true);
+        }
 
         // Resume the most recent conversation rather than always opening a
         // blank one — history is the point of the sidebar.
@@ -98,11 +125,14 @@ export default function App() {
         setTreeId(tree.id);
         setNodes(tree.nodes ?? {});
         setChildren(tree.children ?? {});
-        setNotes(await api.getNotes());
+        // Notes load per session, driven by the sessionId effect below.
         const files = await api.listAttachments();
         setAttachments(files.attachments ?? []);
         setLinks(files.links ?? []);
         setTrees(await api.listTrees());
+        const settings = await api.getSettings();
+        if (settings.branch_model) setBranchModel(settings.branch_model);
+        setTemplates(await api.listTemplates());
       } catch (e) {
         setError(String(e));
       } finally {
@@ -128,11 +158,19 @@ export default function App() {
           setStatus(e.text);
         } else if (e.event === "done") {
           setNodes((prev) => ({ ...prev, [e.node_id]: e.node }));
-          setStreamingId(null);
+          setStreamingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(e.node_id);
+            return next;
+          });
           setStatus(null);
         } else if (e.event === "error") {
           setError(e.message);
-          setStreamingId(null);
+          setStreamingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(e.node_id);
+            return next;
+          });
           setStatus(null);
         }
       }),
@@ -145,6 +183,40 @@ export default function App() {
     () => (focusId ? pathToRoot(nodes, focusId) : []),
     [nodes, focusId],
   );
+
+  // The active session = the root node the focus sits under; with nothing
+  // focused, the first root, so the Notes tab always shows *a* session's doc.
+  // Notes are scoped to this, not the whole conversation.
+  const sessionId = useMemo(() => {
+    if (focusId && nodes[focusId]) return pathToRoot(nodes, focusId)[0]?.id ?? null;
+    return childrenOf(children, null)[0] ?? null;
+  }, [focusId, nodes, children]);
+
+  // A short name for the active session — its opening message — so the Notes
+  // tab makes clear which session's findings it's showing.
+  const sessionLabel = useMemo(() => {
+    if (!sessionId || !nodes[sessionId]) return null;
+    const text = nodes[sessionId].content.replace(/\s+/g, " ").trim();
+    if (!text) return "Untitled session";
+    return text.length > 44 ? `${text.slice(0, 44)}…` : text;
+  }, [sessionId, nodes]);
+
+  // Load the active session's notes whenever the session (or conversation)
+  // changes. A conversation's sessions each keep their own findings doc.
+  useEffect(() => {
+    let cancelled = false;
+    if (!sessionId) {
+      setNotes("");
+      return;
+    }
+    api
+      .getNotes(sessionId)
+      .then((n) => !cancelled && setNotes(n))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, treeId]);
   const focusPathIds = useMemo(
     () => new Set(focusPath.map((n) => n.id)),
     [focusPath],
@@ -162,6 +234,22 @@ export default function App() {
 
   const targetParentId = draft?.parentId ?? focusId;
   const activeMode = draft?.mode ?? mode;
+
+  // While branching, the composer runs on the configured branch default model
+  // (cheap-model routing) unless the user overrides it; the main thread keeps
+  // its own choice. Everything downstream — estimate, send, the picker — reads
+  // these effective values so the two never get crossed.
+  const branchChoice = useMemo(() => {
+    if (!branchModel) return null;
+    const slash = branchModel.indexOf("/");
+    if (slash < 0) return null;
+    return {
+      provider: branchModel.slice(0, slash),
+      model: branchModel.slice(slash + 1),
+    };
+  }, [branchModel]);
+  const effProvider = draft && branchChoice ? branchChoice.provider : provider;
+  const effModel = draft && branchChoice ? branchChoice.model : model;
 
   // Running token spend for the open conversation. Computed from nodes already
   // in memory, so it costs nothing and updates live as replies stream in.
@@ -193,15 +281,17 @@ export default function App() {
         prompt: "",
         mode: activeMode,
         anchorText: draft?.anchorText ?? null,
-        provider,
-        model,
+        provider: effProvider,
+        model: effModel,
       })
       .then((est) => !cancelled && setEstimate(est))
       .catch(() => !cancelled && setEstimate(null));
     return () => {
       cancelled = true;
     };
-  }, [targetParentId, activeMode, provider, model, providers, draft?.anchorText]);
+  }, [targetParentId, activeMode, effProvider, effModel, providers, draft?.anchorText]);
+
+  const anyStreaming = streamingIds.size > 0;
 
   useEffect(() => {
     if (tab !== "chat") return;
@@ -209,7 +299,7 @@ export default function App() {
       top: threadRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [focusId, streamingId, tab]);
+  }, [focusId, anyStreaming, tab]);
 
   // -- actions ------------------------------------------------------------
 
@@ -254,7 +344,7 @@ export default function App() {
           return next;
         });
 
-        setStreamingId(res.assistant_node.id);
+        setStreamingIds((prev) => new Set(prev).add(res.assistant_node.id));
         setFocusId(res.assistant_node.id);
         setDraft(null);
 
@@ -282,11 +372,42 @@ export default function App() {
         mode: activeMode,
         anchorText: draft?.anchorText ?? null,
         anchorNodeId: draft?.anchorNodeId ?? null,
-        provider,
-        model,
+        provider: effProvider,
+        model: effModel,
         searchMode,
       }),
-    [dispatchSend, targetParentId, activeMode, draft, provider, model, searchMode],
+    [dispatchSend, targetParentId, activeMode, draft, effProvider, effModel, searchMode],
+  );
+
+  /**
+   * Fan one question out to several models at once. Each becomes its own
+   * branch, labelled and coloured by model, so the answers diverge into a
+   * little tree you can compare and continue from any of.
+   */
+  const sendMulti = useCallback(
+    async (text: string, targets: { provider: string; model: string }[]) => {
+      if (!booted || targets.length === 0) return;
+      const anchorNodeId = draft?.anchorNodeId ?? focusId ?? null;
+      const parentId = targetParentId;
+      // Sequential so each branch's colour slot is allocated distinctly and the
+      // tree isn't mutated by two calls at once.
+      for (const t of targets) {
+        await dispatchSend({
+          parentId,
+          prompt: text,
+          mode: activeMode,
+          // The branch's identity is the model — that's what makes the strands
+          // distinguishable at a glance.
+          anchorText: t.model,
+          anchorNodeId,
+          provider: t.provider,
+          model: t.model,
+          searchMode,
+        });
+      }
+      setDraft(null);
+    },
+    [booted, draft, focusId, targetParentId, activeMode, searchMode, dispatchSend],
   );
 
   /**
@@ -457,7 +578,9 @@ export default function App() {
   const clipExcerpt = useCallback(async (nodeId: string, markdown: string) => {
     const res = await api.clipNode(nodeId, markdown, false);
     if (!res.ok) return;
-    if (res.notes !== undefined) setNotes(res.notes);
+    // Only refresh the visible doc when the clip landed in the session on
+    // screen; a clip from another session is saved but shown when you switch.
+    if (res.notes !== undefined && res.session_id === sessionId) setNotes(res.notes);
     // Merge only the clip bookkeeping. The response carries the node as the
     // backend knows it, and mid-stream that copy has no content yet — taking
     // it wholesale would blank the message you just clipped from.
@@ -474,7 +597,7 @@ export default function App() {
     );
     setSaveState("saved");
     setClipFlash({ n: Date.now(), message: "excerpt added to notes ✓" });
-  }, []);
+  }, [sessionId]);
 
   /** Clip a whole message. Allowed once — a repeat would duplicate the text. */
   const clipWhole = useCallback(
@@ -495,7 +618,7 @@ export default function App() {
         return;
       }
       if (!res.ok) return;
-      if (res.notes !== undefined) setNotes(res.notes);
+      if (res.notes !== undefined && res.session_id === sessionId) setNotes(res.notes);
       // Same reasoning as clipExcerpt: merge the flag, never the content.
       setNodes((prev) =>
         prev[nodeId]
@@ -505,7 +628,7 @@ export default function App() {
       setSaveState("saved");
       setClipFlash({ n: Date.now(), message: "message added to notes ✓" });
     },
-    [nodes],
+    [nodes, sessionId],
   );
 
   const newSession = useCallback(() => {
@@ -529,7 +652,7 @@ export default function App() {
       setFocusId(focusNodeId);
       setDraft(null);
       setStatus(null);
-      setNotes(await api.getNotes());
+      // Notes load per session via the sessionId effect.
       const files = await api.listAttachments();
       setAttachments(files.attachments ?? []);
       setLinks(files.links ?? []);
@@ -588,28 +711,92 @@ export default function App() {
   );
 
   const cancelStream = useCallback(async () => {
-    if (!streamingId) return;
-    await api.cancel(streamingId);
-  }, [streamingId]);
+    // Stop every in-flight reply, so the button works during a fan-out too.
+    await Promise.all([...streamingIds].map((id) => api.cancel(id)));
+  }, [streamingIds]);
+
+  const changeBranchModel = useCallback((value: string) => {
+    setBranchModel(value);
+    api.setSetting("branch_model", value).catch(() => {});
+  }, []);
+
+  const saveTemplate = useCallback(async (title: string, body: string) => {
+    const tpl = await api.saveTemplate(title, body);
+    setTemplates((prev) => [tpl, ...prev.filter((t) => t.id !== tpl.id)]);
+  }, []);
+
+  const deleteTemplate = useCallback(async (id: string) => {
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    await api.deleteTemplate(id);
+  }, []);
+
+  const refreshProviders = useCallback(async () => {
+    setProviders(await api.refreshModels());
+  }, []);
+
+  const chooseModel = useCallback((choice: { provider: string; model: string }) => {
+    setProvider(choice.provider);
+    setModel(choice.model);
+    try {
+      localStorage.setItem("branch.model", JSON.stringify(choice));
+    } catch {
+      /* ignore quota/private-mode failures */
+    }
+    setShowModelPicker(false);
+  }, []);
 
   // Debounced note persistence — typing shouldn't hit SQLite per keystroke.
   const saveTimer = useRef<number | undefined>(undefined);
   const editNotes = useCallback((content: string) => {
     setNotes(content);
+    // No session yet (a brand-new, un-sent thread) means nowhere to save to.
+    if (!sessionId) return;
     setSaveState("dirty");
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(async () => {
       setSaveState("saving");
-      await api.setNotes(content);
+      await api.setNotes(sessionId, content);
       setSaveState("saved");
     }, 600);
-  }, []);
+  }, [sessionId]);
 
   const exportNotes = useCallback(async () => {
-    const res = await api.exportNotes();
+    const res = await api.exportNotes(sessionId);
     if (res.ok && res.path) setError(null);
     else if (res.error) setError(res.error);
+  }, [sessionId]);
+
+  const exportTree = useCallback(async (id: string) => {
+    const res = await api.exportTree(id);
+    if (res.error) setError(res.error);
   }, []);
+
+  /** Import a tree from JSON as a brand-new conversation, then open it. */
+  const importTree = useCallback(async () => {
+    const res = await api.importTree();
+    if (res.cancelled) return;
+    if (!res.ok || !res.id) {
+      if (res.error) setError(res.error);
+      return;
+    }
+    setTreeId(res.id);
+    setNodes(res.nodes ?? {});
+    setChildren(res.children ?? {});
+    setFocusId(null);
+    setDraft(null);
+    setNotes("");
+    setAttachments([]);
+    setLinks([]);
+    setTrees(await api.listTrees());
+    setTab("chat");
+  }, []);
+
+  /** Export the currently focused thread (root → focus) as Markdown. */
+  const exportBranch = useCallback(async () => {
+    if (!focusId) return;
+    const res = await api.exportBranch(focusId);
+    if (res.error) setError(res.error);
+  }, [focusId]);
 
   // -- clip confirmation --------------------------------------------------
 
@@ -631,6 +818,50 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // A depth-first ordering of the tree, so j/k step through the conversation in
+  // the same order the eye reads it on the canvas.
+  const navOrder = useMemo(() => {
+    const order: string[] = [];
+    const walk = (id: string) => {
+      order.push(id);
+      for (const c of childrenOf(children, id)) walk(c);
+    };
+    for (const r of childrenOf(children, null)) walk(r);
+    return order;
+  }, [children]);
+
+  // j / k move the focused node down / up that ordering. This is the on-canvas
+  // keyboard navigation — held off while typing so the composer isn't hijacked.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (key !== "j" && key !== "k") return;
+      if (navOrder.length === 0) return;
+      e.preventDefault();
+      const cur = focusId ? navOrder.indexOf(focusId) : -1;
+      const delta = key === "j" ? 1 : -1;
+      const nextIdx =
+        cur === -1
+          ? key === "j"
+            ? 0
+            : navOrder.length - 1
+          : Math.min(navOrder.length - 1, Math.max(0, cur + delta));
+      setFocusId(navOrder[nextIdx]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOrder, focusId]);
+
   const rootIds = childrenOf(children, null);
   const visible = focusPath.length ? focusPath : rootIds.map((id) => nodes[id]);
 
@@ -645,6 +876,8 @@ export default function App() {
         onNew={newTree}
         onRename={renameTree}
         onDelete={deleteTree}
+        onExport={exportTree}
+        onImport={importTree}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -669,12 +902,12 @@ export default function App() {
           <span className="ml-3 text-[12px] text-muted">{clipFlash.message}</span>
         )}
 
-        {streamingId && (
+        {anyStreaming && (
           <button
             onClick={cancelStream}
             className="ml-3 rounded-md border border-border px-2.5 py-1 text-[12px] text-warn hover:border-warn"
           >
-            ■ Stop
+            ■ Stop{streamingIds.size > 1 ? ` (${streamingIds.size})` : ""}
           </button>
         )}
 
@@ -699,6 +932,28 @@ export default function App() {
         >
           {isDark ? "☀" : "☾"}
         </button>
+
+        {focusId && (
+          <button
+            onClick={exportBranch}
+            title="Export this thread (root → here) as Markdown"
+            aria-label="Export branch as Markdown"
+            className="rounded-md border border-border px-2.5 py-1 text-[12px] text-muted hover:text-text"
+          >
+            ⭳ md
+          </button>
+        )}
+
+        {Object.keys(nodes).length > 1 && (
+          <button
+            onClick={() => setShowDiff(true)}
+            title="Compare two branches side by side"
+            aria-label="Diff two branches"
+            className="rounded-md border border-border px-2.5 py-1 text-[12px] text-muted hover:text-text"
+          >
+            ⚖ diff
+          </button>
+        )}
 
         <button
           onClick={() => setShowSearch(true)}
@@ -756,14 +1011,14 @@ export default function App() {
                       key={n.id}
                       node={n}
                       color={colorFor(n.id)}
-                      streaming={n.id === streamingId}
+                      streaming={streamingIds.has(n.id)}
                       branchCount={branchesFrom(nodes, children, n.id).length}
                       onBranch={startBranch}
                       onClipExcerpt={clipExcerpt}
                       onClipWhole={clipWhole}
                       onToggleStar={toggleStar}
                       onRegenerate={
-                        n.role === "assistant" && n.id !== streamingId
+                        n.role === "assistant" && !streamingIds.has(n.id)
                           ? regenerate
                           : undefined
                       }
@@ -792,22 +1047,32 @@ export default function App() {
                 onModeChange={(m) =>
                   draft ? setDraft({ ...draft, mode: m }) : setMode(m)
                 }
-                provider={provider}
-                model={model}
+                provider={effProvider}
+                model={effModel}
                 providers={providers}
                 onProviderChange={(p, m) => {
-                  setProvider(p);
-                  setModel(m);
+                  // While branching, changing the model sets this branch's
+                  // default (and persists it); otherwise it's the main thread.
+                  if (draft) {
+                    changeBranchModel(`${p}/${m}`);
+                  } else {
+                    setProvider(p);
+                    setModel(m);
+                  }
                 }}
                 estimate={estimate}
-                busy={streamingId !== null || !booted}
+                busy={anyStreaming || !booted}
                 searchMode={searchMode}
                 onSearchModeChange={setSearchMode}
                 attachmentCount={attachments.length}
                 onAddFile={addFile}
                 status={status}
                 onSend={send}
+                onSendMulti={sendMulti}
                 onCancel={draft ? () => setDraft(null) : undefined}
+                templates={templates}
+                onSaveTemplate={saveTemplate}
+                onDeleteTemplate={deleteTemplate}
               />
             </main>
 
@@ -847,8 +1112,15 @@ export default function App() {
             onNewSession={newSession}
             onClipWhole={clipWhole}
             onSend={send}
-            busy={streamingId !== null || !booted}
+            busy={anyStreaming || !booted}
             status={status}
+            provider={effProvider}
+            model={effModel}
+            providers={providers}
+            onProviderChange={(p, m) => {
+              setProvider(p);
+              setModel(m);
+            }}
             targetLabel={
               !booted
                 ? "Connecting…"
@@ -865,15 +1137,40 @@ export default function App() {
             onChange={editNotes}
             onExport={exportNotes}
             saveState={saveState}
+            hasSession={sessionId !== null}
+            sessionLabel={sessionLabel}
+            multiSession={rootIds.length > 1}
           />
         )}
       </div>
+
+      {showModelPicker && (
+        <ModelPicker
+          providers={providers}
+          initial={lastChoice}
+          onConfirm={chooseModel}
+          onOpenSettings={() => {
+            setShowModelPicker(false);
+            setShowSettings(true);
+          }}
+        />
+      )}
 
       {showSearch && (
         <SearchPalette
           currentTreeId={treeId}
           onOpen={openSearchResult}
           onClose={() => setShowSearch(false)}
+        />
+      )}
+
+      {showDiff && (
+        <DiffView
+          nodes={nodes}
+          children={children}
+          isDark={isDark}
+          initialLeft={focusId}
+          onClose={() => setShowDiff(false)}
         />
       )}
 
@@ -884,6 +1181,9 @@ export default function App() {
             setProviders(await api.setKeys(keys));
           }}
           onClose={() => setShowSettings(false)}
+          onRefresh={refreshProviders}
+          branchModel={branchModel}
+          onBranchModelChange={changeBranchModel}
         />
       )}
       </div>

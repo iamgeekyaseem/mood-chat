@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import threading
 import time
 from dataclasses import asdict
@@ -72,7 +73,71 @@ class Api:
             _run_async(ollama.refresh_models())
         except KeyError:
             pass
-        return self.registry.available()
+
+        avail = self.registry.available()
+
+        # Whether a provider can actually answer, so the UI can steer the user
+        # to a working model at startup instead of the no-key default. Hosted
+        # providers list their models regardless of credentials, so a key check
+        # is the honest signal; Ollama is "configured" when it's running (has
+        # discovered models).
+        keys = self._load_keys()
+        for name, info in avail.items():
+            if name == "ollama":
+                info["configured"] = bool(info.get("models"))
+            elif name == "anthropic":
+                info["configured"] = bool(
+                    keys.get("anthropic")
+                    or os.environ.get("ANTHROPIC_API_KEY")
+                    or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+                )
+            elif name == "openai":
+                info["configured"] = bool(
+                    keys.get("openai") or os.environ.get("OPENAI_API_KEY")
+                )
+            else:
+                info["configured"] = False
+        return avail
+
+    def refresh_models(self) -> dict:
+        """Re-scan Ollama for models pulled since launch.
+
+        The local model list is only read at startup otherwise, so a model
+        pulled while the app is open would stay invisible until a restart.
+        """
+        try:
+            ollama = self.registry.get("ollama")
+            _run_async(ollama.refresh_models())
+        except KeyError:
+            pass
+        return self.providers()
+
+    # -- settings --------------------------------------------------------
+
+    def get_settings(self) -> dict:
+        """User preferences. `branch_model` is the default model for new side
+        branches — cheap-model routing without touching the main thread."""
+        return self.store.get_settings()
+
+    def set_setting(self, key: str, value: str) -> dict:
+        self.store.set_setting(str(key), str(value))
+        return self.store.get_settings()
+
+    # -- templates -------------------------------------------------------
+
+    def list_templates(self) -> list[dict]:
+        return self.store.list_templates()
+
+    def save_template(self, title: str, body: str, template_id: Optional[str] = None) -> dict:
+        tid = require_id(template_id, field="template_id") if template_id else new_id()
+        title = (title or "").strip() or "Untitled template"
+        self.store.save_template(tid, title, body or "")
+        return {"id": tid, "title": title, "body": body or ""}
+
+    def delete_template(self, template_id: str) -> dict:
+        template_id = require_id(template_id, field="template_id")
+        self.store.delete_template(template_id)
+        return {"ok": True}
 
     # -- trees -----------------------------------------------------------
 
@@ -158,7 +223,14 @@ class Api:
         require_id(node_id, field="node_id")
         removed = self.tree.prune(node_id)
         self.store.delete_nodes(removed)
-        return {"removed": removed}
+        # Files that belonged only to the deleted messages have nothing left to
+        # ride along with, so their links and their bytes on disk are cleared
+        # rather than left to accumulate.
+        orphans = self.store.orphan_attachments_after_removing(removed)
+        for att in orphans:
+            self._safe_unlink(att.path)
+            self.store.delete_attachment(att.id)
+        return {"removed": removed, "orphaned_attachments": [a.id for a in orphans]}
 
     def set_starred(self, node_id: str, starred: bool) -> dict:
         require_id(node_id, field="node_id")
@@ -305,19 +377,34 @@ class Api:
         return blocks
 
     # -- notes -----------------------------------------------------------
+    #
+    # Notes are per session — a session being a root node — so the independent
+    # threads on one canvas don't share a findings doc. The session id is the
+    # root of whatever node is involved; the UI passes it explicitly.
 
-    def get_notes(self) -> str:
-        return self.store.get_notes(self.tree_id)
+    def _session_of(self, node_id: str) -> Optional[str]:
+        """The root (session) a node belongs to, or None if it's unknown."""
+        if node_id not in self.tree.nodes:
+            return None
+        return self.tree.path_to_root(node_id)[0].id
 
-    def append_note(self, markdown: str) -> str:
-        return self.store.append_note(self.tree_id, markdown)
+    def get_notes(self, session_id: Optional[str] = None) -> str:
+        if not session_id:
+            return ""
+        require_id(session_id, field="session_id")
+        return self.store.get_notes(self.tree_id, session_id)
+
+    def append_note(self, session_id: str, markdown: str) -> str:
+        require_id(session_id, field="session_id")
+        return self.store.append_note(self.tree_id, session_id, markdown)
 
     def clip_node(self, node_id: str, markdown: str, whole: bool) -> dict:
         """Append a clipping and record where it came from.
 
         A whole-message clip is allowed once — a second one would append the
         same text again — while excerpts are unlimited, since pulling several
-        different sentences out of one reply is a normal thing to want.
+        different sentences out of one reply is a normal thing to want. The
+        clipping lands in the session (root) the clipped node belongs to.
         """
         require_id(node_id, field="node_id")
         node = self.tree.nodes.get(node_id)
@@ -327,30 +414,119 @@ class Api:
         if whole and node.noted:
             return {"ok": False, "already": True, "node": _node_dict(node)}
 
-        content = self.store.append_note(self.tree_id, markdown)
+        session_id = self._session_of(node_id)
+        content = self.store.append_note(self.tree_id, session_id, markdown)
         if whole:
             node.noted = True
         else:
             node.clip_count += 1
         self.store.save_node(self.tree_id, node)
 
-        return {"ok": True, "notes": content, "node": _node_dict(node)}
+        return {
+            "ok": True,
+            "notes": content,
+            "node": _node_dict(node),
+            "session_id": session_id,
+        }
 
-    def set_notes(self, content: str) -> dict:
-        self.store.set_notes(self.tree_id, content)
+    def set_notes(self, session_id: str, content: str) -> dict:
+        require_id(session_id, field="session_id")
+        self.store.set_notes(self.tree_id, session_id, content)
         return {"ok": True}
 
-    def export_notes(self) -> dict:
-        """Write the notes doc wherever the user points a save dialog."""
+    # -- export / import -------------------------------------------------
+
+    def export_branch(self, node_id: str) -> dict:
+        """Save the root→node conversation path as a Markdown transcript.
+
+        A branch is only ever the path it sits on, so this is exactly what the
+        model saw — siblings elsewhere in the tree are correctly left out.
+        """
+        node_id = require_id(node_id, field="node_id")
+        if node_id not in self.tree.nodes:
+            return {"ok": False, "error": "no such node"}
+        markdown = _branch_markdown(self.tree, node_id)
+        if not self.window:
+            return {"ok": True, "markdown": markdown}
+        result = self.window.create_file_dialog(
+            webview.SAVE_DIALOG, save_filename="branch.md"
+        )
+        if not result:
+            return {"ok": False, "cancelled": True}
+        path = Path(result if isinstance(result, str) else result[0])
+        path.write_text(markdown, encoding="utf-8")
+        return {"ok": True, "path": str(path)}
+
+    def export_tree(self, tree_id: Optional[str] = None) -> dict:
+        """Save a whole conversation tree as portable JSON."""
+        tid = require_id(tree_id, field="tree_id") if tree_id else self.tree_id
+        if not tid:
+            return {"ok": False, "error": "no conversation open"}
+        tree = self.tree if tid == self.tree_id else self.store.load_tree(tid)
+        meta = next((t for t in self.store.list_trees() if t["id"] == tid), None)
+        title = meta["title"] if meta else "Untitled"
+        payload = {
+            "branch_export_version": 1,
+            "title": title,
+            "tree": tree.to_dict(),
+        }
+        blob = json.dumps(payload, indent=2, ensure_ascii=False)
+        if not self.window:
+            return {"ok": True, "json": blob}
+        safe = "".join(c for c in title if c.isalnum() or c in " -_").strip() or "tree"
+        result = self.window.create_file_dialog(
+            webview.SAVE_DIALOG, save_filename=f"{safe}.branch.json"
+        )
+        if not result:
+            return {"ok": False, "cancelled": True}
+        path = Path(result if isinstance(result, str) else result[0])
+        path.write_text(blob, encoding="utf-8")
+        return {"ok": True, "path": str(path)}
+
+    def import_tree(self) -> dict:
+        """Load a tree exported by export_tree into a brand-new conversation."""
         if not self.window:
             return {"ok": False, "error": "no window"}
+        chosen = self.window.create_file_dialog(webview.OPEN_DIALOG)
+        if not chosen:
+            return {"ok": False, "cancelled": True}
+        path = Path(chosen if isinstance(chosen, str) else chosen[0])
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            return {"ok": False, "error": f"could not read file: {e}"}
+        if not isinstance(payload, dict) or "tree" not in payload:
+            return {"ok": False, "error": "not a Branch export"}
+
+        tid = new_id()
+        title = str(payload.get("title") or "Imported").strip() or "Imported"
+        self.store.create_tree(tid, title)
+        tree = _tree_from_dict(payload["tree"])
+        # Persist every node; ids are already remapped to be unique.
+        order = sorted(tree.nodes.values(), key=lambda n: n.created_at)
+        for node in order:
+            self.store.save_node(tid, node)
+        self.tree_id = tid
+        self.tree = tree
+        return {"ok": True, "id": tid, "title": title, **tree.to_dict()}
+
+    def export_notes(self, session_id: Optional[str] = None) -> dict:
+        """Write the current session's notes doc wherever the user points a
+        save dialog."""
+        if not self.window:
+            return {"ok": False, "error": "no window"}
+        if not session_id:
+            return {"ok": False, "error": "no session selected"}
+        require_id(session_id, field="session_id")
         result = self.window.create_file_dialog(
             webview.SAVE_DIALOG, save_filename="findings.md"
         )
         if not result:
             return {"ok": False, "cancelled": True}
         path = Path(result if isinstance(result, str) else result[0])
-        path.write_text(self.store.get_notes(self.tree_id), encoding="utf-8")
+        path.write_text(
+            self.store.get_notes(self.tree_id, session_id), encoding="utf-8"
+        )
         return {"ok": True, "path": str(path)}
 
     # -- estimation ------------------------------------------------------
@@ -486,6 +662,9 @@ class Api:
         def finish(buf: list[str], usage: Optional[dict], cancelled: bool) -> None:
             node = self.tree.nodes[node_id]
             node.content = "".join(buf)
+            # A cancelled reply is marked so the UI can flag it as unfinished
+            # rather than presenting a truncated answer as complete.
+            node.stopped = cancelled
             if usage:
                 for k, v in usage.items():
                     setattr(node.usage, k, v)
@@ -560,6 +739,67 @@ def _node_dict(node) -> dict:
     from dataclasses import asdict
 
     return asdict(node)
+
+
+def _branch_markdown(tree: Tree, node_id: str) -> str:
+    """Render the root→node path as a readable Markdown transcript."""
+    path = tree.path_to_root(node_id)
+    lines: list[str] = []
+    for node in path:
+        if node.role == "user":
+            if node.anchor_text:
+                lines.append(f"> branched from: “{node.anchor_text.strip()}”")
+                lines.append("")
+            lines.append("### You")
+        else:
+            label = node.model or node.provider or "Assistant"
+            suffix = "  _(stopped)_" if node.stopped else ""
+            lines.append(f"### {label}{suffix}")
+        lines.append("")
+        lines.append(node.content.strip() or "_(empty)_")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _tree_from_dict(data: dict) -> Tree:
+    """Rebuild a Tree from exported JSON, remapping ids so an import can never
+    collide with existing rows even if the same file is imported twice."""
+    from tree import Node, Usage
+
+    raw_nodes = data.get("nodes", {})
+    id_map = {old: new_id() for old in raw_nodes}
+    tree = Tree()
+    for old_id, nd in raw_nodes.items():
+        usage = nd.get("usage") or {}
+        node = Node(
+            id=id_map[old_id],
+            parent_id=id_map.get(nd.get("parent_id")) if nd.get("parent_id") else None,
+            role=nd.get("role", "user"),
+            content=nd.get("content", ""),
+            created_at=nd.get("created_at", time.time()),
+            model=nd.get("model"),
+            provider=nd.get("provider"),
+            anchor_text=nd.get("anchor_text"),
+            anchor_node_id=id_map.get(nd.get("anchor_node_id"))
+            if nd.get("anchor_node_id")
+            else None,
+            context_mode=nd.get("context_mode", "path"),
+            usage=Usage(**{k: usage.get(k, 0) for k in Usage().__dict__}),
+            collapsed=bool(nd.get("collapsed", False)),
+            starred=bool(nd.get("starred", False)),
+            color_slot=nd.get("color_slot"),
+            noted=bool(nd.get("noted", False)),
+            clip_count=nd.get("clip_count", 0),
+            stopped=bool(nd.get("stopped", False)),
+            x=nd.get("x"),
+            y=nd.get("y"),
+        )
+        tree.nodes[node.id] = node
+    # Rebuild child lists in creation order so layout matches the original.
+    for node in sorted(tree.nodes.values(), key=lambda n: n.created_at):
+        tree._children.setdefault(node.parent_id, []).append(node.id)
+        tree._children.setdefault(node.id, [])
+    return tree
 
 
 def _run_async(coro):

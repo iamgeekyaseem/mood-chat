@@ -14,6 +14,7 @@ import type {
   Node,
   ProviderInfo,
   SearchResult,
+  Template,
   TreeData,
   TreeSummary,
 } from "./types";
@@ -61,27 +62,78 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   return (await api[method](...args)) as T;
 }
 
-/** pywebview injects its api asynchronously; wait for it before first use. */
-export function ready(timeoutMs = 3000): Promise<boolean> {
+/**
+ * pywebview injects its api asynchronously; wait for it before first use.
+ *
+ * Two signals, whichever comes first: the `pywebviewready` event pywebview
+ * dispatches on window, and a poll of the api itself. Relying on the timeout
+ * alone was the bug behind "it only gives mock output" — on a slow start the
+ * 3s timer fired before injection, the app fell back to the browser mock, and
+ * stayed there. The event makes real-app detection reliable; the poll is a
+ * belt-and-suspenders fallback, and only a genuine browser (no pywebview at
+ * all) reaches the timeout.
+ */
+export function ready(timeoutMs = 15000): Promise<boolean> {
   return new Promise((resolve) => {
     if (hasPywebview()) return resolve(true);
+
+    let settled = false;
+    const finish = (value: boolean, cleanup: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
     const started = Date.now();
+    const onReady = () => finish(true, teardown);
     const tick = setInterval(() => {
-      if (hasPywebview()) {
-        clearInterval(tick);
-        resolve(true);
-      } else if (Date.now() - started > timeoutMs) {
-        clearInterval(tick);
-        resolve(false); // browser dev mode
+      if (hasPywebview()) return finish(true, teardown);
+      const elapsed = Date.now() - started;
+      // A real browser never has `window.pywebview` at all — bail out of that
+      // case quickly so dev doesn't sit through the full timeout. When the
+      // object exists but its api isn't bound yet (a slow desktop start), keep
+      // waiting for injection or the ready event.
+      if (window.pywebview === undefined && elapsed > 1500) {
+        return finish(false, teardown);
       }
+      if (elapsed > timeoutMs) finish(false, teardown);
     }, 50);
+
+    function teardown() {
+      clearInterval(tick);
+      window.removeEventListener("pywebviewready", onReady);
+    }
+    window.addEventListener("pywebviewready", onReady);
   });
 }
 
 export const api = {
   providers: () => call<Record<string, ProviderInfo>>("providers"),
+  refreshModels: () => call<Record<string, ProviderInfo>>("refresh_models"),
   setKeys: (keys: Record<string, string>) =>
     call<Record<string, ProviderInfo>>("set_keys", keys),
+  getSettings: () => call<Record<string, string>>("get_settings"),
+  setSetting: (key: string, value: string) =>
+    call<Record<string, string>>("set_setting", key, value),
+  listTemplates: () => call<Template[]>("list_templates"),
+  saveTemplate: (title: string, body: string, id?: string) =>
+    call<Template>("save_template", title, body, id ?? null),
+  deleteTemplate: (id: string) => call<{ ok: boolean }>("delete_template", id),
+  exportBranch: (nodeId: string) =>
+    call<{ ok: boolean; path?: string; markdown?: string; cancelled?: boolean; error?: string }>(
+      "export_branch",
+      nodeId,
+    ),
+  exportTree: (treeId?: string) =>
+    call<{ ok: boolean; path?: string; json?: string; cancelled?: boolean; error?: string }>(
+      "export_tree",
+      treeId ?? null,
+    ),
+  importTree: () =>
+    call<{ ok: boolean; id?: string; title?: string; nodes?: Record<string, Node>; children?: Record<string, string[]>; cancelled?: boolean; error?: string }>(
+      "import_tree",
+    ),
   listTrees: () => call<TreeSummary[]>("list_trees"),
   renameTree: (id: string, title: string) =>
     call<{ ok: boolean }>("rename_tree", id, title),
@@ -100,8 +152,9 @@ export const api = {
     call<{ id: string; x: number; y: number }>("set_position", nodeId, x, y),
   resetLayout: () =>
     call<{ ok: boolean; nodes: string[]; attachments: string[] }>("reset_layout"),
-  getNotes: () => call<string>("get_notes"),
-  appendNote: (markdown: string) => call<string>("append_note", markdown),
+  getNotes: (sessionId: string | null) => call<string>("get_notes", sessionId),
+  appendNote: (sessionId: string, markdown: string) =>
+    call<string>("append_note", sessionId, markdown),
   clipNode: (nodeId: string, markdown: string, whole: boolean) =>
     call<{
       ok: boolean;
@@ -109,11 +162,14 @@ export const api = {
       notes?: string;
       node?: Node;
       error?: string;
+      session_id?: string;
     }>("clip_node", nodeId, markdown, whole),
-  setNotes: (content: string) => call<{ ok: boolean }>("set_notes", content),
-  exportNotes: () =>
+  setNotes: (sessionId: string, content: string) =>
+    call<{ ok: boolean }>("set_notes", sessionId, content),
+  exportNotes: (sessionId: string | null) =>
     call<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>(
       "export_notes",
+      sessionId,
     ),
   estimate: (args: {
     parentId: string | null;
@@ -204,18 +260,30 @@ function mockNode(partial: Partial<Node>): Node {
     noted: false,
     clip_count: 0,
     color_slot: null,
+    stopped: false,
     x: null,
     y: null,
     ...partial,
   };
 }
 
-let mockNotes = "";
+// Notes are keyed by session (root node), mirroring the real backend.
+const mockNotesBySession: Record<string, string> = {};
+function mockSessionOf(nodeId: string): string {
+  let cur = nodeId;
+  while (mockNodes[cur]?.parent_id) cur = mockNodes[cur].parent_id as string;
+  return cur;
+}
 let mockSlot = 0;
 const mockAttachments: Attachment[] = [];
 const mockLinks: AttachmentLink[] = [];
 const mockTrees: TreeSummary[] = [];
 const mockCancelled = new Set<string>();
+const mockSettings: Record<string, string> = {};
+const mockTemplates: Template[] = [
+  { id: "t-review", title: "Code review", body: "Review this for correctness and edge cases:\n\n" },
+  { id: "t-explain", title: "Explain like I'm 5", body: "Explain this simply, no jargon:\n\n" },
+];
 
 async function mock<T>(method: string, args: unknown[]): Promise<T> {
   switch (method) {
@@ -230,6 +298,7 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
             "claude-sonnet-5": { vision: true, tools: true },
             "claude-haiku-4-5": { vision: true, tools: true },
           },
+          configured: false,
           error: null,
         },
         openai: {
@@ -237,6 +306,7 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
           supports_caching: false,
           supports_search: true,
           capabilities: { "gpt-5": { vision: true, tools: true } },
+          configured: false,
           error: null,
         },
         // Mirrors the real local setup: vision but no tool calling, so search
@@ -246,6 +316,7 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
           supports_caching: false,
           supports_search: true,
           capabilities: { "gemma3:4b": { vision: true, tools: false } },
+          configured: true,
           error: null,
         },
       } as T;
@@ -279,12 +350,19 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
       const node = mockNodes[nodeId];
       if (!node) return { ok: false, error: "no such node" } as T;
       if (whole && node.noted) return { ok: false, already: true, node } as T;
-      mockNotes = mockNotes ? `${mockNotes.trimEnd()}\n\n${md}` : md;
+      const sid = mockSessionOf(nodeId);
+      const cur = mockNotesBySession[sid] ?? "";
+      mockNotesBySession[sid] = cur ? `${cur.trimEnd()}\n\n${md}` : md;
       const updated = whole
         ? { ...node, noted: true }
         : { ...node, clip_count: node.clip_count + 1 };
       mockNodes[nodeId] = updated;
-      return { ok: true, notes: mockNotes, node: updated } as T;
+      return {
+        ok: true,
+        notes: mockNotesBySession[sid],
+        node: updated,
+        session_id: sid,
+      } as T;
     }
     case "list_attachments":
       return { attachments: mockAttachments, links: mockLinks } as T;
@@ -386,18 +464,59 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
       }
       return { ok: true, nodes: nodeIds, attachments: mockAttachments.map((a) => a.id) } as T;
     }
-    case "get_notes":
-      return mockNotes as T;
-    case "append_note": {
-      const md = args[0] as string;
-      mockNotes = mockNotes ? `${mockNotes.trimEnd()}\n\n${md}` : md;
-      return mockNotes as T;
+    case "get_notes": {
+      const sid = args[0] as string | null;
+      return (sid ? mockNotesBySession[sid] ?? "" : "") as T;
     }
-    case "set_notes":
-      mockNotes = args[0] as string;
+    case "append_note": {
+      const [sid, md] = args as [string, string];
+      const cur = mockNotesBySession[sid] ?? "";
+      mockNotesBySession[sid] = cur ? `${cur.trimEnd()}\n\n${md}` : md;
+      return mockNotesBySession[sid] as T;
+    }
+    case "set_notes": {
+      const [sid, content] = args as [string, string];
+      if (sid) mockNotesBySession[sid] = content;
       return { ok: true } as T;
+    }
     case "export_notes":
       return { ok: true, path: "/mock/findings.md" } as T;
+    case "refresh_models":
+      return mock<T>("providers", []);
+    case "get_settings":
+      return { ...mockSettings } as T;
+    case "set_setting":
+      mockSettings[args[0] as string] = args[1] as string;
+      return { ...mockSettings } as T;
+    case "list_templates":
+      return mockTemplates as T;
+    case "save_template": {
+      const [title, body, id] = args as [string, string, string | null];
+      if (id) {
+        const t = mockTemplates.find((x) => x.id === id);
+        if (t) {
+          t.title = title;
+          t.body = body;
+          return t as T;
+        }
+      }
+      const tpl: Template = { id: `tpl${++mockSeq}`, title, body };
+      mockTemplates.unshift(tpl);
+      return tpl as T;
+    }
+    case "delete_template": {
+      const i = mockTemplates.findIndex((x) => x.id === args[0]);
+      if (i >= 0) mockTemplates.splice(i, 1);
+      return { ok: true } as T;
+    }
+    case "export_branch": {
+      const node = mockNodes[args[0] as string];
+      return { ok: true, markdown: `### Export\n\n${node?.content ?? ""}` } as T;
+    }
+    case "export_tree":
+      return { ok: true, json: JSON.stringify({ tree: { nodes: mockNodes } }) } as T;
+    case "import_tree":
+      return { ok: false, cancelled: true } as T;
     case "estimate": {
       const tokens = 300 + Object.keys(mockNodes).length * 700;
       return {
@@ -457,7 +576,7 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
           clearInterval(timer);
           mockCancelled.delete(assistant.id);
           const partial = reply.slice(0, i);
-          mockNodes[assistant.id] = { ...assistant, content: partial };
+          mockNodes[assistant.id] = { ...assistant, content: partial, stopped: true };
           window.__branch?.emit({
             event: "done",
             node_id: assistant.id,

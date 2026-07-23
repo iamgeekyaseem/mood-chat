@@ -106,7 +106,34 @@ MIGRATIONS: list[tuple[str, str]] = [
         "clip_count",
         "ALTER TABLE nodes ADD COLUMN clip_count INTEGER NOT NULL DEFAULT 0",
     ),
+    ("stopped", "ALTER TABLE nodes ADD COLUMN stopped INTEGER NOT NULL DEFAULT 0"),
 ]
+
+# Tables added after the first release, created idempotently on open. Kept
+# separate from column MIGRATIONS because CREATE IF NOT EXISTS is self-guarding.
+EXTRA_TABLES = """
+CREATE TABLE IF NOT EXISTS templates (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    created_at  REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- Notes scoped to a session (a root node) rather than the whole tree, so the
+-- independent sessions on one canvas keep separate findings docs.
+CREATE TABLE IF NOT EXISTS session_notes (
+    tree_id    TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    content    TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (tree_id, session_id)
+);
+"""
 
 
 class Store:
@@ -117,7 +144,9 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
+        self.db.executescript(EXTRA_TABLES)
         self._migrate()
+        self._migrate_notes_to_sessions()
         self._backfill_fts()
         self.db.commit()
 
@@ -126,6 +155,39 @@ class Store:
         for column, ddl in MIGRATIONS:
             if column not in existing:
                 self.db.execute(ddl)
+
+    def _migrate_notes_to_sessions(self) -> None:
+        """Move any legacy per-tree note onto that tree's earliest root session.
+
+        Runs once: after the copy, the old `notes` row is cleared so a second
+        launch doesn't re-import it over edits made since. Nothing is lost — a
+        conversation's single old doc becomes its first session's doc.
+        """
+        rows = self.db.execute(
+            "SELECT tree_id, content FROM notes WHERE content != ''"
+        ).fetchall()
+        for r in rows:
+            root = self.db.execute(
+                "SELECT id FROM nodes WHERE tree_id = ? AND parent_id IS NULL"
+                " ORDER BY created_at LIMIT 1",
+                (r["tree_id"],),
+            ).fetchone()
+            if root is None:
+                continue
+            # Don't clobber a session doc that already exists.
+            exists = self.db.execute(
+                "SELECT 1 FROM session_notes WHERE tree_id = ? AND session_id = ?",
+                (r["tree_id"], root["id"]),
+            ).fetchone()
+            if exists is None:
+                self.db.execute(
+                    "INSERT INTO session_notes (tree_id, session_id, content, updated_at)"
+                    " VALUES (?,?,?,?)",
+                    (r["tree_id"], root["id"], r["content"], time.time()),
+                )
+            self.db.execute(
+                "UPDATE notes SET content = '' WHERE tree_id = ?", (r["tree_id"],)
+            )
 
     def _backfill_fts(self) -> None:
         """Populate the search index from existing nodes on first run after the
@@ -247,8 +309,8 @@ class Store:
             """INSERT OR REPLACE INTO nodes
                (id, tree_id, parent_id, role, content, created_at, model,
                 provider, anchor_text, anchor_node_id, context_mode, usage,
-                collapsed, starred, color_slot, x, y, noted, clip_count)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                collapsed, starred, color_slot, x, y, noted, clip_count, stopped)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 node.id,
                 tree_id,
@@ -269,6 +331,7 @@ class Store:
                 node.y,
                 int(node.noted),
                 node.clip_count,
+                int(node.stopped),
             ),
         )
         self._fts_upsert(node.id, tree_id, node.content)
@@ -316,6 +379,7 @@ class Store:
                 y=r["y"],
                 noted=bool(r["noted"]),
                 clip_count=r["clip_count"],
+                stopped=bool(r["stopped"]),
             )
             tree.nodes[node.id] = node
             tree._children.setdefault(node.parent_id, []).append(node.id)
@@ -381,6 +445,45 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def orphan_attachments_after_removing(self, node_ids: list[str]) -> list[Attachment]:
+        """Drop links from removed nodes, then return attachments left orphaned.
+
+        node_attachments has no foreign key back to nodes (a file can outlive
+        any single message), so pruning a subtree leaves dangling links behind.
+        This clears those links and reports the files that no longer belong to
+        any message, so the caller can unlink them from disk.
+        """
+        if not node_ids:
+            return []
+        placeholders = ",".join("?" * len(node_ids))
+        candidates = [
+            r["attachment_id"]
+            for r in self.db.execute(
+                f"SELECT DISTINCT attachment_id FROM node_attachments"
+                f" WHERE node_id IN ({placeholders})",
+                node_ids,
+            ).fetchall()
+        ]
+        self.db.execute(
+            f"DELETE FROM node_attachments WHERE node_id IN ({placeholders})",
+            node_ids,
+        )
+        orphans: list[Attachment] = []
+        for aid in candidates:
+            still = self.db.execute(
+                "SELECT 1 FROM node_attachments WHERE attachment_id = ? LIMIT 1",
+                (aid,),
+            ).fetchone()
+            if still:
+                continue
+            row = self.db.execute(
+                "SELECT * FROM attachments WHERE id = ?", (aid,)
+            ).fetchone()
+            if row:
+                orphans.append(Attachment(**dict(row)))
+        self.db.commit()
+        return orphans
+
     def attachments_for_nodes(self, node_ids: list[str]) -> list[Attachment]:
         if not node_ids:
             return []
@@ -395,27 +498,73 @@ class Store:
         return [Attachment(**dict(r)) for r in rows]
 
     # -- notes -----------------------------------------------------------
+    #
+    # Notes are scoped to a session, not a whole conversation. A "session" is a
+    # root node (a conversation can hold several independent roots on one
+    # canvas), so its findings doc is keyed by (tree_id, session_id). Legacy
+    # per-tree notes were migrated onto each tree's earliest root in _migrate.
 
-    def get_notes(self, tree_id: str) -> str:
+    def get_notes(self, tree_id: str, session_id: str) -> str:
+        if not session_id:
+            return ""
         row = self.db.execute(
-            "SELECT content FROM notes WHERE tree_id = ?", (tree_id,)
+            "SELECT content FROM session_notes WHERE tree_id = ? AND session_id = ?",
+            (tree_id, session_id),
         ).fetchone()
         return row["content"] if row else ""
 
-    def set_notes(self, tree_id: str, content: str) -> None:
+    def set_notes(self, tree_id: str, session_id: str, content: str) -> None:
+        if not session_id:
+            return
         self.db.execute(
-            """INSERT INTO notes (tree_id, content, updated_at) VALUES (?,?,?)
-               ON CONFLICT(tree_id) DO UPDATE SET content = excluded.content,
-                                                  updated_at = excluded.updated_at""",
-            (tree_id, content, time.time()),
+            """INSERT INTO session_notes (tree_id, session_id, content, updated_at)
+               VALUES (?,?,?,?)
+               ON CONFLICT(tree_id, session_id) DO UPDATE SET
+                   content = excluded.content, updated_at = excluded.updated_at""",
+            (tree_id, session_id, content, time.time()),
         )
         self.db.commit()
 
-    def append_note(self, tree_id: str, markdown: str) -> str:
-        current = self.get_notes(tree_id)
+    def append_note(self, tree_id: str, session_id: str, markdown: str) -> str:
+        current = self.get_notes(tree_id, session_id)
         joined = f"{current.rstrip()}\n\n{markdown}".lstrip() if current else markdown
-        self.set_notes(tree_id, joined)
+        self.set_notes(tree_id, session_id, joined)
         return joined
+
+    # -- templates -------------------------------------------------------
+
+    def list_templates(self) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT id, title, body, created_at FROM templates ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_template(self, template_id: str, title: str, body: str) -> None:
+        self.db.execute(
+            """INSERT INTO templates (id, title, body, created_at) VALUES (?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET title = excluded.title,
+                                             body = excluded.body""",
+            (template_id, title, body, time.time()),
+        )
+        self.db.commit()
+
+    def delete_template(self, template_id: str) -> None:
+        self.db.execute("DELETE FROM templates WHERE id = ?", (template_id,))
+        self.db.commit()
+
+    # -- settings --------------------------------------------------------
+
+    def get_settings(self) -> dict:
+        rows = self.db.execute("SELECT key, value FROM settings").fetchall()
+        return {r["key"]: r["value"] for r in rows}
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.db.execute(
+            """INSERT INTO settings (key, value) VALUES (?,?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+            (key, value),
+        )
+        self.db.commit()
 
     def close(self) -> None:
         self.db.close()

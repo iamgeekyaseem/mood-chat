@@ -10,6 +10,8 @@ interface Props {
   onNew: () => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  onExport: (id: string) => void;
+  onImport: () => void;
 }
 
 /**
@@ -26,6 +28,8 @@ export function Sessions({
   onNew,
   onRename,
   onDelete,
+  onExport,
+  onImport,
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -75,12 +79,20 @@ export function Sessions({
         </button>
       </header>
 
-      <div className="p-2">
+      <div className="flex gap-1.5 p-2">
         <button
           onClick={onNew}
-          className="w-full rounded-md bg-ink px-3 py-1.5 text-[12px] font-medium text-on-ink"
+          className="flex-1 rounded-md bg-ink px-3 py-1.5 text-[12px] font-medium text-on-ink"
         >
           + New conversation
+        </button>
+        <button
+          onClick={onImport}
+          title="Import a conversation tree from a .branch.json file"
+          aria-label="Import conversation"
+          className="rounded-md border border-border px-2 py-1.5 text-[12px] text-muted hover:text-text"
+        >
+          ⭱
         </button>
       </div>
 
@@ -168,6 +180,13 @@ export function Sessions({
                         </div>
                       ) : (
                         <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            onClick={() => onExport(t.id)}
+                            title="Export this conversation as JSON"
+                            className="rounded px-1 text-[11px] text-faint hover:text-text"
+                          >
+                            ⭳
+                          </button>
                           <button
                             onClick={() => {
                               setDraft(t.title);

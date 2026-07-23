@@ -28,10 +28,36 @@ TEXT_SUFFIXES = {
 
 MAX_TEXT_CHARS = 20_000
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_PDF_CHARS = 20_000
 
 THUMB_WIDTH = 260
 TEXT_PREVIEW_LINES = 6
 TEXT_PREVIEW_CHARS = 400
+
+
+def _pdf_text(path: Path, limit: int = MAX_PDF_CHARS) -> Optional[str]:
+    """Extract text from a PDF, or None if pypdf is absent / the file is not
+    text-bearing (scanned images have no extractable text)."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return None
+    try:
+        reader = PdfReader(str(path))
+        out: list[str] = []
+        total = 0
+        for page in reader.pages:
+            t = (page.extract_text() or "").strip()
+            if not t:
+                continue
+            out.append(t)
+            total += len(t)
+            if total >= limit:
+                break
+        text = "\n\n".join(out).strip()
+    except Exception:
+        return None
+    return text or None
 
 
 @dataclass
@@ -95,7 +121,12 @@ def preview(att: Attachment) -> dict:
         return {"type": "text", "text": "\n".join(lines)[:TEXT_PREVIEW_CHARS]}
 
     if att.kind == "pdf":
-        return {"type": "none", "note": "PDF — no page preview"}
+        text = _pdf_text(path, limit=TEXT_PREVIEW_CHARS * 3)
+        if text:
+            snippet = " ".join(text.split())[:TEXT_PREVIEW_CHARS]
+            return {"type": "text", "text": snippet}
+        # No extractable text (scanned/image PDF) or pypdf missing.
+        return {"type": "none", "note": "PDF — no extractable text"}
 
     return {"type": "none", "note": att.mime}
 
@@ -183,7 +214,29 @@ def to_blocks(att: Attachment, supports_vision: bool = True) -> list[dict]:
             }
         ]
 
-    # PDFs and everything else: name it rather than pretending it was read.
+    if kind == "pdf":
+        text = _pdf_text(path)
+        if text:
+            truncated = len(text) >= MAX_PDF_CHARS
+            note = "\n\n[…truncated]" if truncated else ""
+            return [
+                {
+                    "type": "text",
+                    "text": f"<attached_pdf name={att.name!r}>\n{text[:MAX_PDF_CHARS]}{note}\n</attached_pdf>",
+                }
+            ]
+        # pypdf absent, or a scanned PDF with no text layer.
+        return [
+            {
+                "type": "text",
+                "text": (
+                    f"[attached PDF “{att.name}” has no extractable text "
+                    f"(likely scanned images) — its contents are not available to the model]"
+                ),
+            }
+        ]
+
+    # Everything else: name it rather than pretending it was read.
     return [
         {
             "type": "text",

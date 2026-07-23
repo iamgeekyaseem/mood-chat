@@ -5,6 +5,10 @@ interface Props {
   providers: Record<string, ProviderInfo>;
   onSave: (keys: Record<string, string>) => Promise<void>;
   onClose: () => void;
+  onRefresh: () => Promise<void>;
+  /** The default model for new side branches; "" means "same as main". */
+  branchModel: string;
+  onBranchModelChange: (value: string) => void;
 }
 
 const FIELDS = [
@@ -27,10 +31,27 @@ const FIELDS = [
  * into the form, so a saved key can't be copied out of the UI. Leaving a field
  * blank keeps whatever is already saved.
  */
-export function Settings({ providers, onSave, onClose }: Props) {
+export function Settings({
+  providers,
+  onSave,
+  onClose,
+  onRefresh,
+  branchModel,
+  onBranchModelChange,
+}: Props) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Every configured model, flattened as "provider/model" so a branch default
+  // can point at anything — including a free local model for cheap side-quests.
+  const allModels: { value: string; label: string }[] = [];
+  for (const [pname, info] of Object.entries(providers)) {
+    for (const m of info.models) {
+      allModels.push({ value: `${pname}/${m}`, label: `${m} · ${pname}` });
+    }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -121,10 +142,26 @@ export function Settings({ providers, onSave, onClose }: Props) {
             );
           })}
 
-          <div className="mb-1 border-t border-border pt-4">
-            <h3 className="mb-1 text-[11px] font-medium uppercase tracking-wider text-faint">
-              Local models
-            </h3>
+          <div className="mb-4 border-t border-border pt-4">
+            <div className="mb-1 flex items-center gap-2">
+              <h3 className="text-[11px] font-medium uppercase tracking-wider text-faint">
+                Local models
+              </h3>
+              <button
+                onClick={async () => {
+                  setRefreshing(true);
+                  try {
+                    await onRefresh();
+                  } finally {
+                    setRefreshing(false);
+                  }
+                }}
+                disabled={refreshing}
+                className="ml-auto rounded-md border border-border px-2 py-0.5 text-[11px] text-muted hover:text-text disabled:opacity-50"
+              >
+                {refreshing ? "Refreshing…" : "↻ Refresh"}
+              </button>
+            </div>
             <p className="text-[12px] leading-relaxed text-muted">
               Ollama needs no key — only <code className="font-mono">ollama serve</code>{" "}
               running.{" "}
@@ -134,11 +171,34 @@ export function Settings({ providers, onSave, onClose }: Props) {
                 </span>
               ) : (
                 <span className="text-faint">
-                  ○ not detected. Models are discovered at launch, so restart
-                  after pulling one.
+                  ○ not detected. Pull a model, then hit Refresh — no restart
+                  needed.
                 </span>
               )}
             </p>
+          </div>
+
+          <div className="mb-1 border-t border-border pt-4">
+            <h3 className="mb-1 text-[11px] font-medium uppercase tracking-wider text-faint">
+              Cheap-model routing
+            </h3>
+            <p className="mb-2 text-[12px] leading-relaxed text-muted">
+              Which model new side branches default to. Point it at a free local
+              model to explore tangents without spending on the flagship — the
+              main thread keeps whatever you pick in the composer.
+            </p>
+            <select
+              value={branchModel}
+              onChange={(e) => onBranchModelChange(e.target.value)}
+              className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-[13px] outline-none focus:border-ink"
+            >
+              <option value="">Same as main thread</option>
+              {allModels.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

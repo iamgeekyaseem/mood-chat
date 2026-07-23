@@ -102,6 +102,16 @@ export function Message({
           </span>
         )}
 
+        {node.stopped && !streaming && (
+          <span
+            className="rounded-sm px-1.5 py-px text-[11px] text-warn"
+            style={{ background: "var(--color-sunken)" }}
+            title="This reply was stopped early — the text below is only what had streamed so far"
+          >
+            ⏹ stopped
+          </span>
+        )}
+
         <div className="ml-auto flex items-center gap-2">
           {/* Whole-message add: once only, then it reports its state. */}
           <button
