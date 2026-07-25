@@ -28,3 +28,5 @@ brag-output/composition/node_modules/
 
 # The app writes user data under ~/.branch (outside the repo) — nothing to ignore
 # here, noted for clarity.
+screenshots/
+backend/ss/

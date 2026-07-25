@@ -1,0 +1,78 @@
+name: Build desktop app
+
+# Builds one-click installers: a macOS .dmg and a Windows .exe.
+# PyInstaller can't cross-compile, so each OS builds its own artifact natively.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: |
+          uv sync
+          uv pip install pyinstaller
+
+      - name: Build app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          uv run pyinstaller --noconfirm --windowed --name Branch \
+            --icon packaging/icons/Branch.icns \
+            --add-data "frontend/dist:frontend/dist" \
+            --collect-all ddgs --collect-all lxml \
+            backend/app.py
+          mkdir -p dist/dmg
+          cp -R dist/Branch.app dist/dmg/
+          hdiutil create -volname Branch -srcfolder dist/dmg -ov -format UDZO dist/Branch.dmg
+
+      - name: Build app (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          uv run pyinstaller --noconfirm --onefile --windowed --name Branch \
+            --icon packaging/icons/Branch.ico \
+            --add-data "frontend/dist;frontend/dist" \
+            --collect-all ddgs --collect-all lxml \
+            backend/app.py
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: Branch-macOS
+          path: dist/Branch.dmg
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: Branch-Windows
+          path: dist/Branch.exe
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.os == 'macOS' && 'dist/Branch.dmg' || 'dist/Branch.exe' }}

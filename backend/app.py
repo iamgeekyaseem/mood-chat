@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import os
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -27,7 +28,14 @@ from store import Store
 from tree import Tree
 
 APP_DIR = Path.home() / ".branch"
-FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist" / "index.html"
+
+# A PyInstaller build extracts (onefile) or ships (onedir) bundled data next
+# to sys._MEIPASS / the executable rather than next to this source file.
+if getattr(sys, "frozen", False):
+    _BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+else:
+    _BASE_DIR = Path(__file__).parent.parent
+FRONTEND_DIST = _BASE_DIR / "frontend" / "dist" / "index.html"
 FRONTEND_DEV = "http://localhost:5173"
 
 

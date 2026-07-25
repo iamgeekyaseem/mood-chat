@@ -40,6 +40,7 @@ stays exactly where you left it.
 ## Table of contents
 
 - [Quick start](#quick-start--how-to-run-it-right-now)
+- [Prebuilt app (one-click install)](#prebuilt-app--one-click-install-macos--windows)
 - [Running free on a local model](#running-it-entirely-on-a-local-model)
 - [Why it costs less](#why-it-costs-less)
 - [The three tabs](#the-three-tabs)
@@ -110,6 +111,39 @@ Then pick the model under **ollama** in the composer's dropdown.
 ```
 
 Deleting `~/.branch/` resets the app completely.
+
+---
+
+## Prebuilt app — one-click install (macOS / Windows)
+
+Don't want to touch a terminal? Grab a build from the
+[Releases page](https://github.com/iamgeekyaseem/mood-chat/releases) instead
+of running it from source.
+
+**macOS**
+1. Download `Branch.dmg`.
+2. Double-click it, then drag **Branch** into **Applications**.
+3. Open **Branch** from Applications (or Spotlight).
+4. First launch: macOS will say it's from an unidentified developer (the
+   build isn't code-signed) — right-click the app → **Open** → **Open** to
+   confirm once. After that it opens normally.
+
+**Windows**
+1. Download `Branch.exe`.
+2. Double-click it. That's the whole app — nothing to install or unzip.
+3. First launch: SmartScreen may warn it's unrecognized (unsigned build) —
+   click **More info** → **Run anyway**.
+
+Either way, your data still lives under `~/.branch` (`C:\Users\<you>\.branch`
+on Windows) — same as running from source, see
+[Where your data lives](#where-your-data-lives) above.
+
+These builds come from [`.github/workflows/build.yml`](.github/workflows/build.yml),
+which runs on every `v*` tag push (or manually via
+**Actions → Build desktop app → Run workflow**) and builds natively on a
+macOS and a Windows runner, since PyInstaller can't cross-compile. The app
+icon (`packaging/icons/Branch.icns` / `.ico`) is generated from
+[`frontend/public/favicon.svg`](frontend/public/favicon.svg).
 
 ---
 
@@ -436,6 +470,8 @@ frontend/src/
   tree.ts       client mirror of traversal, plus minimap layout
   useTheme.ts   light/dark resolution (the two palettes are separate sets)
   components/   Minimap, Message, Composer, BranchRail, GraphView, NotesView
+packaging/icons/  Branch.icns / Branch.ico, generated from favicon.svg
+.github/workflows/build.yml   builds the macOS .dmg and Windows .exe
 ```
 
 ## Other controls
