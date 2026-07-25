@@ -15,6 +15,8 @@ stays exactly where you left it.
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z5I423V25G)
+
 ![Branch demo](brag-output-2026-07-24-231924/brag.gif)
 
 *(full-quality video: [brag.mp4](brag-output-2026-07-24-231924/brag.mp4))*

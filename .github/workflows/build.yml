@@ -50,6 +50,7 @@ jobs:
             backend/app.py
           mkdir -p dist/dmg
           cp -R dist/Branch.app dist/dmg/
+          ln -s /Applications dist/dmg/Applications
           hdiutil create -volname Branch -srcfolder dist/dmg -ov -format UDZO dist/Branch.dmg
 
       - name: Build app (Windows)
