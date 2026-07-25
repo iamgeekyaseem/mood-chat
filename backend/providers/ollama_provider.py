@@ -49,6 +49,12 @@ class OllamaProvider(Provider):
     def supports_tools(self, model: str) -> bool:
         return "tools" in self._caps.get(model, [])
 
+    def supports_thinking(self, model: str) -> bool:
+        # Ollama reports "thinking" for reasoning models (qwen3, deepseek-r1,
+        # …). Those return their chain of thought in a separate `thinking`
+        # field once asked for it, instead of inlining <think> tags.
+        return "thinking" in self._caps.get(model, [])
+
     async def refresh_models(self) -> list[str]:
         """Ollama's model list is whatever the user has pulled locally."""
         try:
@@ -123,10 +129,16 @@ class OllamaProvider(Provider):
         system: Optional[str] = None,
         max_tokens: int = 16000,
         search_mode: str = "off",
+        think_mode: str = "auto",
     ) -> AsyncIterator[StreamChunk]:
         msgs = self._to_ollama(messages, model)
         if system:
             msgs = [{"role": "system", "content": system}] + msgs
+
+        # A reasoning model only splits out its thinking when explicitly asked;
+        # "fast" turns it off so it answers straight away. Never send `think`
+        # to a model that doesn't advertise the capability -- Ollama rejects it.
+        think = self.supports_thinking(model) and think_mode != "fast"
 
         use_tools = search_mode == "on" and self.supports_tools(model)
         inject = search_mode == "on" and not self.supports_tools(model)
@@ -158,7 +170,9 @@ class OllamaProvider(Provider):
                         return
                     yield chunk
 
-            async for chunk in self._stream_once(client, model, msgs, max_tokens):
+            async for chunk in self._stream_once(
+                client, model, msgs, max_tokens, think
+            ):
                 yield chunk
 
     async def _tool_rounds(
@@ -203,14 +217,28 @@ class OllamaProvider(Provider):
                 msgs.append({"role": "tool", "content": result})
 
     async def _stream_once(
-        self, client: httpx.AsyncClient, model: str, msgs: list[dict], max_tokens: int
+        self,
+        client: httpx.AsyncClient,
+        model: str,
+        msgs: list[dict],
+        max_tokens: int,
+        think: bool = False,
     ) -> AsyncIterator[StreamChunk]:
-        payload = {
+        payload: dict = {
             "model": model,
             "messages": msgs,
             "stream": True,
             "options": {"num_predict": max_tokens},
         }
+        if think:
+            payload["think"] = True
+
+        # Reasoning models that don't advertise the capability inline their
+        # chain of thought as <think>…</think> in the content stream. This
+        # splitter peels that out so it lands in the thinking channel, not the
+        # answer -- the same place native `thinking` goes.
+        splitter = _ThinkSplitter()
+
         async with client.stream(
             "POST", f"{self.base_url}/api/chat", json=payload
         ) as resp:
@@ -220,6 +248,11 @@ class OllamaProvider(Provider):
                     continue
                 data = json.loads(line)
                 if data.get("done"):
+                    # Emit anything the splitter was holding back as a possible
+                    # partial tag before closing out.
+                    kind, piece = splitter.flush()
+                    if piece:
+                        yield StreamChunk(**{kind: piece})
                     yield StreamChunk(
                         done=True,
                         usage={
@@ -230,9 +263,18 @@ class OllamaProvider(Provider):
                         },
                     )
                     return
-                content = data.get("message", {}).get("content", "")
+                message = data.get("message", {})
+                # Native reasoning field (models that declare "thinking").
+                thinking = message.get("thinking", "")
+                if thinking:
+                    yield StreamChunk(thinking=thinking)
+                content = message.get("content", "")
                 if content:
-                    yield StreamChunk(text=content)
+                    for kind, piece in splitter.feed(content):
+                        if kind == "thinking":
+                            yield StreamChunk(thinking=piece)
+                        else:
+                            yield StreamChunk(text=piece)
 
     async def count_tokens(
         self, model: str, messages: list[dict], system: Optional[str] = None
@@ -243,6 +285,56 @@ class OllamaProvider(Provider):
         if system:
             chars += len(system)
         return chars // 4
+
+
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
+
+
+class _ThinkSplitter:
+    """Incrementally split an inline <think>…</think> stream.
+
+    Tags can straddle chunk boundaries, so a trailing run that could still turn
+    into a tag is held back and reconsidered when the next chunk arrives.
+    `flush` releases whatever remains once the stream ends.
+    """
+
+    def __init__(self) -> None:
+        self.buf = ""
+        self.in_think = False
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        self.buf += text
+        out: list[tuple[str, str]] = []
+        while True:
+            tag = _THINK_CLOSE if self.in_think else _THINK_OPEN
+            idx = self.buf.find(tag)
+            if idx == -1:
+                safe = self._safe_upto(tag)
+                if safe > 0:
+                    out.append(self._label(self.buf[:safe]))
+                    self.buf = self.buf[safe:]
+                break
+            if idx > 0:
+                out.append(self._label(self.buf[:idx]))
+            self.buf = self.buf[idx + len(tag) :]
+            self.in_think = not self.in_think
+        return [(k, p) for k, p in out if p]
+
+    def flush(self) -> tuple[str, str]:
+        rest, self.buf = self.buf, ""
+        return self._label(rest)
+
+    def _label(self, text: str) -> tuple[str, str]:
+        return ("thinking" if self.in_think else "text", text)
+
+    def _safe_upto(self, tag: str) -> int:
+        # Keep back the longest trailing slice that is a prefix of `tag`; it may
+        # complete into a real tag on the next chunk.
+        for hold in range(len(tag) - 1, 0, -1):
+            if self.buf.endswith(tag[:hold]):
+                return len(self.buf) - hold
+        return len(self.buf)
 
 
 # Prompts that clearly operate on text already in the conversation, or are

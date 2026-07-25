@@ -32,6 +32,11 @@ class Provider(ABC):
     def supports_vision(self, model: str) -> bool:
         return True
 
+    def supports_thinking(self, model: str) -> bool:
+        """Whether this model can expose a separate reasoning stream, so the UI
+        can offer a think/fast toggle and render a thinking panel."""
+        return False
+
     @abstractmethod
     async def stream(
         self,
@@ -40,6 +45,9 @@ class Provider(ABC):
         system: Optional[str] = None,
         max_tokens: int = 16000,
         search_mode: str = "off",
+        # "auto" lets the model decide, "think" forces reasoning on, "fast"
+        # forces it off. Only meaningful for thinking-capable models.
+        think_mode: str = "auto",
     ) -> AsyncIterator[StreamChunk]:
         ...
 

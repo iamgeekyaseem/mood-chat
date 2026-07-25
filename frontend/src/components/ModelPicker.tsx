@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { IconCheck } from "./icons";
 import type { ModelChoice, ProviderInfo } from "../types";
 
 interface Props {
@@ -118,7 +119,7 @@ export function ModelPicker({
                           {!r.configured && " · not configured"}
                         </span>
                       </span>
-                      {selected && <span className="text-[12px] text-muted">✓</span>}
+                      {selected && <IconCheck className="h-3.5 w-3.5 text-muted" />}
                     </button>
                   </li>
                 );

@@ -58,6 +58,7 @@ class Registry:
                 m: {
                     "vision": p.supports_vision(m),
                     "tools": getattr(p, "supports_tools", lambda _m: False)(m),
+                    "thinking": p.supports_thinking(m),
                 }
                 for m in p.models()
             }

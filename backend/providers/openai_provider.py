@@ -35,6 +35,7 @@ class OpenAIProvider(Provider):
         system: Optional[str] = None,
         max_tokens: int = 16000,
         search_mode: str = "off",
+        think_mode: str = "auto",
     ) -> AsyncIterator[StreamChunk]:
         msgs = list(messages)
 

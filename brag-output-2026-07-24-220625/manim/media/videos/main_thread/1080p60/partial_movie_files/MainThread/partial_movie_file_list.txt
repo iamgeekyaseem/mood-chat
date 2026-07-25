@@ -1,0 +1,6 @@
+# This file is used internally by FFMPEG.
+file 'file:/Users/aseem/myai/claude-gui-aseem/brag-output-2026-07-24-220625/manim/media/videos/main_thread/1080p60/partial_movie_files/MainThread/2089673876_747065055_223132457.mov'
+file 'file:/Users/aseem/myai/claude-gui-aseem/brag-output-2026-07-24-220625/manim/media/videos/main_thread/1080p60/partial_movie_files/MainThread/4248996729_1310203519_4091479609.mov'
+file 'file:/Users/aseem/myai/claude-gui-aseem/brag-output-2026-07-24-220625/manim/media/videos/main_thread/1080p60/partial_movie_files/MainThread/4248996729_1020726498_2003526491.mov'
+file 'file:/Users/aseem/myai/claude-gui-aseem/brag-output-2026-07-24-220625/manim/media/videos/main_thread/1080p60/partial_movie_files/MainThread/4248996729_1872471725_2178207544.mov'
+file 'file:/Users/aseem/myai/claude-gui-aseem/brag-output-2026-07-24-220625/manim/media/videos/main_thread/1080p60/partial_movie_files/MainThread/4248996729_2217825475_4254728393.mov'

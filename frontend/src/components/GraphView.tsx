@@ -14,9 +14,29 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { branchDash, resolveBranchColor } from "../colors";
-import { branchRoot, childrenOf, type ChildMap, type NodeMap } from "../tree";
+import { branchDash, resolveBranchColor, type ResolvedColor } from "../colors";
+import {
+  branchRoot,
+  childrenOf,
+  compareGroupFor,
+  type ChildMap,
+  type NodeMap,
+} from "../tree";
 import type { Attachment, AttachmentLink, Node, ProviderInfo } from "../types";
+import { ExpandModal } from "./ExpandModal";
+import {
+  IconBranch,
+  IconCheck,
+  IconChevron,
+  IconChevronDown,
+  IconClose,
+  IconExpand,
+  IconNotes,
+  IconOpenInChat,
+  IconRegenerate,
+  IconStar,
+  IconStop,
+} from "./icons";
 
 interface Props {
   nodes: NodeMap;
@@ -40,6 +60,8 @@ interface Props {
   onOpenInChat: (id: string) => void;
   onSelect: (id: string) => void;
   onToggleCollapse: (id: string) => void;
+  onCancel: (id: string) => void;
+  streamingIds: Set<string>;
   // On-canvas composing
   onSend: (text: string) => void;
   busy: boolean;
@@ -66,8 +88,16 @@ interface CardData extends Record<string, unknown> {
   onToggleStar: (id: string) => void;
   onClipWhole: (id: string) => void;
   onToggleCollapse: (id: string) => void;
+  onExpand: (id: string) => void;
+  onCancel: (id: string) => void;
   hiddenCount: number;
   isFocus: boolean;
+  streaming: boolean;
+}
+
+interface CompareBandData extends Record<string, unknown> {
+  width: number;
+  label: string;
 }
 
 const COL_W = 340;
@@ -94,8 +124,11 @@ function Card({ data }: NodeProps) {
     onToggleStar,
     onClipWhole,
     onToggleCollapse,
+    onExpand,
+    onCancel,
     hiddenCount,
     isFocus,
+    streaming,
   } = data as unknown as CardData;
   const isUser = node.role === "user";
 
@@ -148,7 +181,15 @@ function Card({ data }: NodeProps) {
           />
         )}
         <span className="truncate">
-          {node.anchor_text ? `⑂ ${node.anchor_text}` : isUser ? "You" : "Reply"}
+          {node.anchor_text ? (
+            <span className="inline-flex items-center gap-1">
+              <IconBranch className="h-3 w-3" /> {node.anchor_text}
+            </span>
+          ) : isUser ? (
+            "You"
+          ) : (
+            "Reply"
+          )}
         </span>
 
         {(hiddenCount > 0 || node.collapsed) && (
@@ -158,9 +199,39 @@ function Card({ data }: NodeProps) {
               onToggleCollapse(node.id);
             }}
             title={node.collapsed ? "Expand" : "Collapse — hide what follows"}
-            className="shrink-0 text-[11px] leading-none text-faint hover:text-text"
+            className="flex shrink-0 items-center gap-0.5 text-[11px] leading-none text-faint transition-transform hover:scale-110 hover:text-text active:scale-95"
           >
-            {node.collapsed ? `▸ ${hiddenCount}` : "▾"}
+            {node.collapsed ? (
+              <>
+                <IconChevron className="h-3 w-3" /> {hiddenCount}
+              </>
+            ) : (
+              <IconChevronDown className="h-3 w-3" />
+            )}
+          </button>
+        )}
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onExpand(node.id);
+          }}
+          title="View full message"
+          className="shrink-0 text-faint transition-transform hover:scale-110 hover:text-text active:scale-95"
+        >
+          <IconExpand className="h-3.5 w-3.5" />
+        </button>
+
+        {streaming && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel(node.id);
+            }}
+            title="Stop this reply"
+            className="shrink-0 text-warn transition-transform hover:scale-110 active:scale-95"
+          >
+            <IconStop className="h-3 w-3" />
           </button>
         )}
 
@@ -170,17 +241,24 @@ function Card({ data }: NodeProps) {
             onToggleStar(node.id);
           }}
           title={node.starred ? "Unmark as important" : "Mark as important"}
-          className="ml-auto shrink-0 text-[13px] leading-none"
+          className="ml-auto shrink-0 transition-transform hover:scale-110 active:scale-95"
           style={{ color: node.starred ? "var(--color-star)" : "var(--color-faint)" }}
         >
-          {node.starred ? "★" : "☆"}
+          <IconStar filled={node.starred} className="h-3.5 w-3.5" />
         </button>
       </div>
 
       {/* Selecting a card targets it for the on-canvas composer; it no longer
-          throws you over to the Chat tab. */}
+          throws you over to the Chat tab. Double-click opens the full-text
+          modal instead — the single click's onSelect still fires first (a
+          browser dblclick always fires click first), which is harmless since
+          onSelect is idempotent. */}
       <button
         onClick={() => onSelect(node.id)}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onExpand(node.id);
+        }}
         className="block w-full px-3 py-2 text-left"
       >
         <p className="line-clamp-3 text-[12px] leading-relaxed text-text">
@@ -194,14 +272,17 @@ function Card({ data }: NodeProps) {
             e.stopPropagation();
             onOpenInChat(node.id);
           }}
-          className="hover:text-text"
+          className="flex items-center gap-1 transition-transform hover:scale-105 hover:text-text active:scale-95"
         >
-          ↗ chat
+          <IconOpenInChat className="h-3 w-3" /> chat
         </button>
 
         {node.clip_count > 0 && !node.noted && (
-          <span title={`${node.clip_count} excerpt(s) clipped from this message`}>
-            ✎ {node.clip_count}
+          <span
+            className="flex items-center gap-0.5"
+            title={`${node.clip_count} excerpt(s) clipped from this message`}
+          >
+            <IconNotes className="h-3 w-3" /> {node.clip_count}
           </span>
         )}
 
@@ -220,12 +301,20 @@ function Card({ data }: NodeProps) {
           }
           className={
             node.noted
-              ? "ml-auto cursor-not-allowed opacity-60"
-              : "ml-auto hover:text-text"
+              ? "ml-auto flex cursor-not-allowed items-center gap-1 opacity-60"
+              : "ml-auto flex items-center gap-1 transition-transform hover:scale-105 hover:text-text active:scale-95"
           }
           style={node.noted ? { color: "var(--color-star)" } : undefined}
         >
-          {node.noted ? "in notes ✓" : "+ notes"}
+          {node.noted ? (
+            <>
+              <IconCheck className="h-3 w-3" /> in notes
+            </>
+          ) : (
+            <>
+              <IconNotes className="h-3 w-3" /> notes
+            </>
+          )}
         </button>
       </div>
 
@@ -294,9 +383,9 @@ function FileCard({ data }: NodeProps) {
             e.stopPropagation();
             onDelete(attachment.id);
           }}
-          className="ml-auto text-[11px] text-faint hover:text-warn"
+          className="ml-auto text-faint transition-transform hover:scale-110 hover:text-warn active:scale-95"
         >
-          ✕
+          <IconClose className="h-3 w-3" />
         </button>
       </div>
 
@@ -324,7 +413,27 @@ function FileCard({ data }: NodeProps) {
   );
 }
 
-const nodeTypes = { card: Card, file: FileCard };
+/**
+ * Decorative backdrop marking a group of sibling cards created by the same
+ * "compare" fan-out. Neutral dashed border only — saturated hue stays
+ * reserved for branch identity (color_slot), so grouping is a layout cue,
+ * not a new colour.
+ */
+function CompareBand({ data }: NodeProps) {
+  const { width, label } = data as unknown as CompareBandData;
+  return (
+    <div
+      className="pointer-events-none rounded-lg border border-dashed"
+      style={{ width, height: ROW_H + CARD_H - 20, borderColor: "var(--color-border)" }}
+    >
+      <span className="ml-2 mt-1 inline-block rounded-sm bg-surface px-1.5 text-[10px] text-faint">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+const nodeTypes = { card: Card, file: FileCard, compareBand: CompareBand };
 
 export function GraphView({
   nodes,
@@ -347,6 +456,8 @@ export function GraphView({
   onOpenInChat,
   onSelect,
   onToggleCollapse,
+  onCancel,
+  streamingIds,
   onSend,
   busy,
   status,
@@ -358,6 +469,7 @@ export function GraphView({
 }: Props) {
   const [draft, setDraft] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const activeProviders = Object.entries(providers).filter(
     ([, info]) => info.models.length > 0,
   );
@@ -378,6 +490,8 @@ export function GraphView({
     onClipWhole,
     onToggleCollapse,
     onDeleteAttachment,
+    onCancel,
+    onExpand: setExpandedId,
   });
   latest.current = {
     onSelect,
@@ -386,6 +500,8 @@ export function GraphView({
     onClipWhole,
     onToggleCollapse,
     onDeleteAttachment,
+    onCancel,
+    onExpand: setExpandedId,
   };
 
   const stable = useMemo(
@@ -396,6 +512,8 @@ export function GraphView({
       onClipWhole: (id: string) => latest.current.onClipWhole(id),
       onToggleCollapse: (id: string) => latest.current.onToggleCollapse(id),
       onDeleteAttachment: (id: string) => latest.current.onDeleteAttachment(id),
+      onCancel: (id: string) => latest.current.onCancel(id),
+      onExpand: (id: string) => latest.current.onExpand(id),
     }),
     [],
   );
@@ -406,6 +524,19 @@ export function GraphView({
     onSend(text);
     setDraft("");
   }, [draft, busy, onSend]);
+
+  // Hoisted out of the layout memo so the expand modal (rendered outside it)
+  // can resolve a card's colour too.
+  const colorFor = useCallback(
+    (n: Node): ResolvedColor | null => {
+      const root = branchRoot(nodes, n.id);
+      return root?.color_slot != null
+        ? resolveBranchColor(root.color_slot, isDark)
+        : null;
+    },
+    [nodes, isDark],
+  );
+
   const { flowNodes, flowEdges } = useMemo(() => {
     const laid: FlowNode[] = [];
     const edges: Edge[] = [];
@@ -419,22 +550,25 @@ export function GraphView({
     // against these and slide down until they're clear, so nothing ever lands
     // completely on top of another node — including a card the user dragged.
     const placed: { x: number; y: number }[] = [];
-    const collides = (x: number, y: number) =>
-      placed.some(
-        (p) => Math.abs(p.x - x) < CARD_W && Math.abs(p.y - y) < CARD_H,
-      );
+    // Breathing room once cleared — matches the compact spacing used elsewhere
+    // (px-3 etc.) rather than a large arbitrary gap.
+    const GAP = 12;
     const resolve = (x: number, y: number) => {
       let yy = y;
       let guard = 0;
-      while (collides(x, yy) && guard++ < 200) yy += ROW_H / 2;
+      // Push only as far as the *specific* box in the way requires — never a
+      // flat ROW_H/2 step, which could shove a card well past its natural
+      // spot when the real overlap was small. X stays pinned to the node's
+      // column throughout, so a nudge never makes a parent→child edge jog
+      // sideways or cross another.
+      while (guard++ < 200) {
+        const hit = placed.find(
+          (p) => Math.abs(p.x - x) < CARD_W && Math.abs(p.y - yy) < CARD_H,
+        );
+        if (!hit) break;
+        yy = hit.y + CARD_H + GAP;
+      }
       return yy;
-    };
-
-    const colorFor = (n: Node) => {
-      const root = branchRoot(nodes, n.id);
-      return root?.color_slot != null
-        ? resolveBranchColor(root.color_slot, isDark)
-        : null;
     };
 
     // A branch's whole strand shares one dash pattern (keyed to its colour
@@ -496,8 +630,11 @@ export function GraphView({
           onToggleStar: stable.onToggleStar,
           onClipWhole: stable.onClipWhole,
           onToggleCollapse: stable.onToggleCollapse,
+          onExpand: stable.onExpand,
+          onCancel: stable.onCancel,
           hiddenCount: descendantCount(id),
           isFocus: id === focusId,
+          streaming: streamingIds.has(id),
         } satisfies CardData,
       });
 
@@ -546,6 +683,30 @@ export function GraphView({
         });
         visit(k.id, col + 1 + forkIndex, y);
       });
+
+      // If this batch of forks is a "compare" fan-out (same prompt sent to
+      // several models at once), lay a neutral dashed band behind their
+      // columns so the group reads together — a layout cue, not a new colour.
+      if (forks.length >= 2) {
+        const group = compareGroupFor(nodes, children, forks[0].id);
+        if (group && group.members.every((m) => forks.some((f) => f.id === m.userId))) {
+          const xs = forks.map((_, i) => (col + 1 + i) * COL_W);
+          const minX = Math.min(...xs) - 16;
+          const maxX = Math.max(...xs) + CARD_W + 16;
+          laid.push({
+            id: `band:${id}`,
+            type: "compareBand",
+            draggable: false,
+            selectable: false,
+            zIndex: -1,
+            position: { x: minX, y: y + ROW_H - 28 },
+            data: {
+              width: maxX - minX,
+              label: `Compare · ${group.members.length}`,
+            } satisfies CompareBandData,
+          });
+        }
+      }
     };
 
     // Pin every manually-dragged card as an obstacle up front — before any
@@ -603,10 +764,11 @@ export function GraphView({
     children,
     attachments,
     links,
-    isDark,
     focusId,
     stable,
     starredOnly,
+    streamingIds,
+    colorFor,
   ]);
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(flowNodes);
@@ -691,20 +853,20 @@ export function GraphView({
         <button
           onClick={() => setStarredOnly((v) => !v)}
           title="Show only starred nodes and their ancestors"
-          className={`rounded-md border px-3 py-1.5 text-[12px] font-medium shadow-sm ${
+          className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12px] font-medium shadow-sm ${
             starredOnly
               ? "border-transparent bg-ink text-on-ink"
               : "border-border bg-surface hover:border-ink"
           }`}
         >
-          ★ Starred only
+          <IconStar filled className="h-3.5 w-3.5" /> Starred only
         </button>
         <button
           onClick={onResetLayout}
           title="Snap every card back to the automatic layout"
-          className="rounded-md border border-border bg-surface px-3 py-1.5 text-[12px] font-medium shadow-sm hover:border-ink"
+          className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-[12px] font-medium shadow-sm transition-transform hover:border-ink active:scale-95"
         >
-          ⤢ Reset layout
+          <IconRegenerate className="h-3.5 w-3.5" /> Reset layout
         </button>
       </div>
 
@@ -816,6 +978,14 @@ export function GraphView({
           )}
         </div>
       </div>
+
+      {expandedId && nodes[expandedId] && (
+        <ExpandModal
+          node={nodes[expandedId]}
+          color={colorFor(nodes[expandedId])}
+          onClose={() => setExpandedId(null)}
+        />
+      )}
     </div>
   );
 }

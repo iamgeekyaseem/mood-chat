@@ -579,6 +579,7 @@ class Api:
         provider: str = "anthropic",
         model: str = "claude-opus-4-8",
         search_mode: str = "off",
+        think_mode: str = "auto",
     ) -> dict:
         p = self.registry.get(provider)
         ctx = assemble(
@@ -616,7 +617,7 @@ class Api:
 
         threading.Thread(
             target=self._stream_worker,
-            args=(p, model, ctx.messages, assistant_node.id, search_mode),
+            args=(p, model, ctx.messages, assistant_node.id, search_mode, think_mode),
             daemon=True,
         ).start()
 
@@ -654,7 +655,7 @@ class Api:
         return {"ok": True}
 
     def _stream_worker(
-        self, provider, model, messages, node_id, search_mode="off"
+        self, provider, model, messages, node_id, search_mode="off", think_mode="auto"
     ) -> None:
         cancel = threading.Event()
         self._cancels[node_id] = cancel
@@ -682,7 +683,7 @@ class Api:
             buf: list[str] = []
             try:
                 async for chunk in provider.stream(
-                    model, messages, search_mode=search_mode
+                    model, messages, search_mode=search_mode, think_mode=think_mode
                 ):
                     # Checked between chunks rather than mid-token: the partial
                     # answer is kept, so stopping never loses what arrived.

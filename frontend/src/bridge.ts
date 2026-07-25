@@ -197,6 +197,7 @@ export const api = {
     provider: string;
     model: string;
     searchMode?: string;
+    thinkMode?: string;
   }) =>
     call<{ user_node: Node; assistant_node: Node; cache_marked: boolean }>(
       "send",
@@ -208,6 +209,7 @@ export const api = {
       args.provider,
       args.model,
       args.searchMode ?? "off",
+      args.thinkMode ?? "auto",
     ) as Promise<{
       user_node: Node;
       assistant_node: Node;
@@ -294,9 +296,9 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
           supports_caching: true,
           supports_search: true,
           capabilities: {
-            "claude-opus-4-8": { vision: true, tools: true },
-            "claude-sonnet-5": { vision: true, tools: true },
-            "claude-haiku-4-5": { vision: true, tools: true },
+            "claude-opus-4-8": { vision: true, tools: true, thinking: true },
+            "claude-sonnet-5": { vision: true, tools: true, thinking: true },
+            "claude-haiku-4-5": { vision: true, tools: true, thinking: true },
           },
           configured: false,
           error: null,
@@ -305,17 +307,20 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
           models: ["gpt-5"],
           supports_caching: false,
           supports_search: true,
-          capabilities: { "gpt-5": { vision: true, tools: true } },
+          capabilities: { "gpt-5": { vision: true, tools: true, thinking: false } },
           configured: false,
           error: null,
         },
-        // Mirrors the real local setup: vision but no tool calling, so search
-        // takes the inject path.
+        // Mirrors the real local setup: a plain vision model plus a reasoning
+        // model (qwen3) that streams a separate thinking channel.
         ollama: {
-          models: ["gemma3:4b"],
+          models: ["gemma3:4b", "qwen3:8b"],
           supports_caching: false,
           supports_search: true,
-          capabilities: { "gemma3:4b": { vision: true, tools: false } },
+          capabilities: {
+            "gemma3:4b": { vision: true, tools: false, thinking: false },
+            "qwen3:8b": { vision: false, tools: true, thinking: true },
+          },
           configured: true,
           error: null,
         },
@@ -534,17 +539,27 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
       } as T;
     }
     case "send": {
-      const [parentId, prompt, mode, anchorText, anchorNodeId, , , searchMode] =
-        args as [
-          string | null,
-          string,
-          string,
-          string | null,
-          string | null,
-          string,
-          string,
-          string,
-        ];
+      const [
+        parentId,
+        prompt,
+        mode,
+        anchorText,
+        anchorNodeId,
+        ,
+        ,
+        searchMode,
+        thinkMode,
+      ] = args as [
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string,
+        string,
+        string,
+        string,
+      ];
       const user = mockNode({
         role: "user",
         content: prompt,
@@ -564,6 +579,29 @@ async function mock<T>(method: string, args: unknown[]): Promise<T> {
           node_id: assistant.id,
           text: `searching the web for “${prompt.slice(0, 40)}”…`,
         });
+      }
+
+      // Reasoning models stream a separate thinking channel before the answer;
+      // mock a little of it so the thinking panel is developable in-browser.
+      if (thinkMode !== "fast") {
+        const thought =
+          "Let me work through this. The user is asking about " +
+          `“${prompt.slice(0, 30)}”. I should consider the context, weigh a ` +
+          "couple of approaches, then give a direct answer.";
+        let t = 0;
+        const think = setInterval(() => {
+          const slice = thought.slice(t, t + 6);
+          t += 6;
+          if (!slice) {
+            clearInterval(think);
+            return;
+          }
+          window.__branch?.emit({
+            event: "thinking",
+            node_id: assistant.id,
+            text: slice,
+          });
+        }, 20);
       }
 
       const reply =

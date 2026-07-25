@@ -1,4 +1,14 @@
 import { useEffect, useState } from "react";
+import {
+  IconBranch,
+  IconCheck,
+  IconClose,
+  IconCompare,
+  IconFast,
+  IconNotes,
+  IconTemplates,
+  IconThink,
+} from "./icons";
 import type {
   ContextMode,
   Estimate,
@@ -6,6 +16,7 @@ import type {
   ProviderInfo,
   SearchMode,
   Template,
+  ThinkMode,
 } from "../types";
 
 interface Props {
@@ -21,6 +32,8 @@ interface Props {
   busy: boolean;
   searchMode: SearchMode;
   onSearchModeChange: (m: SearchMode) => void;
+  thinkMode: ThinkMode;
+  onThinkModeChange: (m: ThinkMode) => void;
   attachmentCount: number;
   onAddFile: () => void;
   status?: string | null;
@@ -52,6 +65,8 @@ export function Composer({
   busy,
   searchMode,
   onSearchModeChange,
+  thinkMode,
+  onThinkModeChange,
   attachmentCount,
   onAddFile,
   status,
@@ -104,6 +119,7 @@ export function Composer({
   const info = providers[provider];
   const caps = info?.capabilities?.[model];
   const searchable = info?.supports_search ?? false;
+  const thinkable = caps?.thinking ?? false;
   // Models without tool calling still get search — we run it and hand over the
   // results — so the control stays available, but the label should be honest
   // about which path it takes.
@@ -115,7 +131,7 @@ export function Composer({
     <div className="border-t border-border bg-surface px-4 py-3">
       {anchorText && (
         <div className="mb-2 flex items-start gap-2 text-[12px]">
-          <span className="text-muted">⑂</span>
+          <IconBranch className="mt-0.5 h-3.5 w-3.5 text-muted" />
           <span className="text-muted">
             branching from{" "}
             <span className="text-text">“{anchorText}”</span>
@@ -197,12 +213,42 @@ export function Composer({
           </button>
         )}
 
+        {/* Reasoning models only: choose whether to think before answering.
+            Thinking is slower but sharper; fast skips it for a quick reply. */}
+        {thinkable && (
+          <div className="inline-flex overflow-hidden rounded-md border border-border">
+            <button
+              onClick={() => onThinkModeChange("auto")}
+              title="Let the model reason before it answers"
+              className={`flex items-center gap-1 px-2 py-1 ${
+                thinkMode === "auto"
+                  ? "bg-ink text-on-ink"
+                  : "text-muted hover:text-text"
+              }`}
+            >
+              <IconThink className="h-3.5 w-3.5" /> think
+            </button>
+            <button
+              onClick={() => onThinkModeChange("fast")}
+              title="Skip reasoning for a quicker reply"
+              className={`flex items-center gap-1 border-l border-border px-2 py-1 ${
+                thinkMode === "fast"
+                  ? "bg-ink text-on-ink"
+                  : "text-muted hover:text-text"
+              }`}
+            >
+              <IconFast className="h-3.5 w-3.5" /> fast
+            </button>
+          </div>
+        )}
+
         <button
           onClick={onAddFile}
           title="Attach a file — it appears on the Graph tab, where you can connect it to a question"
-          className="rounded-md border border-border px-2 py-1 text-muted hover:text-text"
+          className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted hover:text-text"
         >
-          + file{attachmentCount > 0 ? ` (${attachmentCount})` : ""}
+          <IconNotes className="h-3.5 w-3.5" /> file
+          {attachmentCount > 0 ? ` (${attachmentCount})` : ""}
         </button>
 
         {/* Saved openings: insert a reusable prompt, or bank the current one. */}
@@ -210,9 +256,9 @@ export function Composer({
           <button
             onClick={() => setShowTemplates((v) => !v)}
             title="Saved openings — reusable prompts you start from"
-            className="rounded-md border border-border px-2 py-1 text-muted hover:text-text"
+            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted hover:text-text"
           >
-            ⌸ templates
+            <IconTemplates className="h-3.5 w-3.5" /> templates
           </button>
           {showTemplates && (
             <div className="absolute bottom-full z-30 mb-1 max-h-72 w-72 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-xl">
@@ -239,9 +285,9 @@ export function Composer({
                   <button
                     onClick={() => onDeleteTemplate(t.id)}
                     title="Delete template"
-                    className="shrink-0 px-1 text-[11px] text-faint opacity-0 hover:text-warn group-hover:opacity-100"
+                    className="shrink-0 px-1 text-faint opacity-0 transition-transform hover:scale-110 hover:text-warn group-hover:opacity-100 active:scale-95"
                   >
-                    ✕
+                    <IconClose className="h-3 w-3" />
                   </button>
                 </div>
               ))}
@@ -301,13 +347,13 @@ export function Composer({
           <button
             onClick={() => setShowMulti((v) => !v)}
             title="Send this question to several models at once — each answer becomes its own branch"
-            className={`rounded-md border px-2 py-1 ${
+            className={`flex items-center gap-1 rounded-md border px-2 py-1 ${
               multiTargets.length > 0
                 ? "border-transparent bg-ink text-on-ink"
                 : "border-border text-muted hover:text-text"
             }`}
           >
-            ⑉ compare
+            <IconCompare className="h-3.5 w-3.5" /> compare
             {multiTargets.length > 0 ? ` (${multiTargets.length})` : ""}
           </button>
           {showMulti && (
@@ -336,7 +382,7 @@ export function Composer({
                               : "border-border"
                           }`}
                         >
-                          {checked ? "✓" : ""}
+                          {checked && <IconCheck className="h-2.5 w-2.5" />}
                         </span>
                         <span className="truncate text-[12px] text-text">{m}</span>
                       </button>

@@ -67,6 +67,55 @@ export function branchRoot(nodes: NodeMap, id: string): Node | null {
   return null;
 }
 
+export interface CompareGroup {
+  parentId: string | null;
+  prompt: string;
+  /** One entry per model column, in creation order. */
+  members: { userId: string; assistantId: string | null; model: string | null }[];
+}
+
+/**
+ * Group sibling user nodes produced by the same `sendMulti` fan-out: same
+ * parent, same prompt text, same `anchor_node_id` (including a shared root
+ * session where it's null on every member), created within a minute of each
+ * other. That shape is unique to a fan-out — a single re-ask never repeats
+ * the same parent+content+anchor_node_id — so no extra persisted field is
+ * needed to detect it.
+ */
+export function compareGroupFor(
+  nodes: NodeMap,
+  children: ChildMap,
+  userId: string,
+): CompareGroup | null {
+  const u = nodes[userId];
+  if (!u || u.role !== "user") return null;
+
+  const siblings = childrenOf(children, u.parent_id)
+    .map((id) => nodes[id])
+    .filter(
+      (n): n is Node =>
+        Boolean(n) &&
+        n.role === "user" &&
+        n.anchor_node_id === u.anchor_node_id &&
+        n.content === u.content &&
+        Math.abs(n.created_at - u.created_at) < 60,
+    )
+    .sort((a, b) => a.created_at - b.created_at);
+
+  if (siblings.length < 2) return null;
+
+  return {
+    parentId: u.parent_id,
+    prompt: u.content,
+    members: siblings.map((s) => {
+      const assistantId =
+        childrenOf(children, s.id).find((c) => nodes[c]?.role === "assistant") ??
+        null;
+      return { userId: s.id, assistantId, model: s.model };
+    }),
+  };
+}
+
 // -- minimap layout ---------------------------------------------------------
 
 export interface LaidOutNode {

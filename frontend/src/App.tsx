@@ -2,9 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, onStream, ready } from "./bridge";
 import { resolveBranchColor } from "./colors";
 import { BranchRail } from "./components/BranchRail";
+import { CompareRow } from "./components/CompareRow";
 import { Composer } from "./components/Composer";
 import { DiffView } from "./components/DiffView";
 import { GraphView } from "./components/GraphView";
+import {
+  IconDiff,
+  IconExport,
+  IconMoon,
+  IconSearch,
+  IconSettings,
+  IconStop,
+  IconSun,
+} from "./components/icons";
 import { Message } from "./components/Message";
 import { Minimap } from "./components/Minimap";
 import { ModelPicker } from "./components/ModelPicker";
@@ -16,6 +26,7 @@ import {
   branchRoot,
   branchesFrom,
   childrenOf,
+  compareGroupFor,
   pathToRoot,
   threadTip,
   type ChildMap,
@@ -32,6 +43,7 @@ import type {
   SearchMode,
   Tab,
   Template,
+  ThinkMode,
   TreeSummary,
 } from "./types";
 
@@ -94,6 +106,10 @@ export default function App() {
   const [layoutEpoch, setLayoutEpoch] = useState(0);
 
   const [searchMode, setSearchMode] = useState<SearchMode>("off");
+  const [thinkMode, setThinkMode] = useState<ThinkMode>("auto");
+  // Reasoning streamed per assistant node. Kept out of the persisted Node —
+  // it's a live, ephemeral trace shown in each reply's thinking panel.
+  const [thinkingById, setThinkingById] = useState<Record<string, string>>({});
   const [templates, setTemplates] = useState<Template[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [links, setLinks] = useState<AttachmentLink[]>([]);
@@ -154,6 +170,11 @@ export default function App() {
             if (!n) return prev;
             return { ...prev, [e.node_id]: { ...n, content: n.content + e.text } };
           });
+        } else if (e.event === "thinking") {
+          setThinkingById((prev) => ({
+            ...prev,
+            [e.node_id]: (prev[e.node_id] ?? "") + e.text,
+          }));
         } else if (e.event === "status") {
           setStatus(e.text);
         } else if (e.event === "done") {
@@ -315,6 +336,7 @@ export default function App() {
       provider: string;
       model: string;
       searchMode?: SearchMode;
+      thinkMode?: ThinkMode;
     }) => {
       if (!booted) return;
       setError(null);
@@ -328,6 +350,7 @@ export default function App() {
           provider: opts.provider,
           model: opts.model,
           searchMode: opts.searchMode ?? "off",
+          thinkMode: opts.thinkMode ?? "auto",
         });
 
         setNodes((prev) => ({
@@ -375,8 +398,9 @@ export default function App() {
         provider: effProvider,
         model: effModel,
         searchMode,
+        thinkMode,
       }),
-    [dispatchSend, targetParentId, activeMode, draft, effProvider, effModel, searchMode],
+    [dispatchSend, targetParentId, activeMode, draft, effProvider, effModel, searchMode, thinkMode],
   );
 
   /**
@@ -403,11 +427,12 @@ export default function App() {
           provider: t.provider,
           model: t.model,
           searchMode,
+          thinkMode,
         });
       }
       setDraft(null);
     },
-    [booted, draft, focusId, targetParentId, activeMode, searchMode, dispatchSend],
+    [booted, draft, focusId, targetParentId, activeMode, searchMode, thinkMode, dispatchSend],
   );
 
   /**
@@ -430,9 +455,10 @@ export default function App() {
         anchorNodeId: question.anchor_node_id,
         provider: question.provider ?? provider,
         model: question.model ?? model,
+        thinkMode,
       });
     },
-    [nodes, dispatchSend, provider, model],
+    [nodes, dispatchSend, provider, model, thinkMode],
   );
 
   // -- attachments --------------------------------------------------------
@@ -881,14 +907,14 @@ export default function App() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-      <nav className="flex items-center gap-1 border-b border-border px-4 py-2">
-        <span className="mr-3 text-[13px] font-medium">Branch</span>
+      <nav className="flex items-center gap-1.5 border-b border-border px-4 py-2">
+        <span className="mr-3 text-[14px] font-semibold tracking-tight">Branch</span>
 
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`rounded-md px-3 py-1 text-[12px] transition-colors ${
+            className={`flex h-8 items-center rounded-md px-3 text-[13px] transition-colors ${
               tab === t.id
                 ? "bg-ink text-on-ink"
                 : "text-muted hover:text-text"
@@ -905,9 +931,10 @@ export default function App() {
         {anyStreaming && (
           <button
             onClick={cancelStream}
-            className="ml-3 rounded-md border border-border px-2.5 py-1 text-[12px] text-warn hover:border-warn"
+            className="ml-3 flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-[13px] text-warn transition-transform hover:border-warn active:scale-95"
           >
-            ■ Stop{streamingIds.size > 1 ? ` (${streamingIds.size})` : ""}
+            <IconStop className="h-3.5 w-3.5" /> Stop
+            {streamingIds.size > 1 ? ` (${streamingIds.size})` : ""}
           </button>
         )}
 
@@ -928,9 +955,9 @@ export default function App() {
           onClick={toggleTheme}
           title={isDark ? "Switch to light" : "Switch to dark"}
           aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-          className={`${tokenTotals.output > 0 ? "ml-3" : "ml-auto"} rounded-md border border-border px-2.5 py-1 text-[12px] text-muted hover:text-text`}
+          className={`${tokenTotals.output > 0 ? "ml-3" : "ml-auto"} flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted transition-transform hover:border-ink hover:text-text active:scale-95`}
         >
-          {isDark ? "☀" : "☾"}
+          {isDark ? <IconSun className="h-4 w-4" /> : <IconMoon className="h-4 w-4" />}
         </button>
 
         {focusId && (
@@ -938,9 +965,9 @@ export default function App() {
             onClick={exportBranch}
             title="Export this thread (root → here) as Markdown"
             aria-label="Export branch as Markdown"
-            className="rounded-md border border-border px-2.5 py-1 text-[12px] text-muted hover:text-text"
+            className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-[13px] text-muted transition-transform hover:border-ink hover:text-text active:scale-95"
           >
-            ⭳ md
+            <IconExport className="h-4 w-4" /> md
           </button>
         )}
 
@@ -949,9 +976,9 @@ export default function App() {
             onClick={() => setShowDiff(true)}
             title="Compare two branches side by side"
             aria-label="Diff two branches"
-            className="rounded-md border border-border px-2.5 py-1 text-[12px] text-muted hover:text-text"
+            className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-[13px] text-muted transition-transform hover:border-ink hover:text-text active:scale-95"
           >
-            ⚖ diff
+            <IconDiff className="h-4 w-4" /> diff
           </button>
         )}
 
@@ -959,24 +986,24 @@ export default function App() {
           onClick={() => setShowSearch(true)}
           title="Search messages (⌘K)"
           aria-label="Open search"
-          className="rounded-md border border-border px-2.5 py-1 text-[12px] text-muted hover:text-text"
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted transition-transform hover:border-ink hover:text-text active:scale-95"
         >
-          ⌕
+          <IconSearch className="h-[18px] w-[18px]" />
         </button>
 
         <button
           onClick={() => setShowSettings(true)}
           title="Settings"
           aria-label="Settings"
-          className="rounded-md border border-border px-2.5 py-1 text-[12px] text-muted hover:text-text"
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted transition-transform hover:border-ink hover:text-text active:scale-95"
         >
-          ⚙
+          <IconSettings className="h-[18px] w-[18px]" />
         </button>
 
         <button
           onClick={newSession}
           title="Start an independent session inside this conversation"
-          className="rounded-md border border-border px-2.5 py-1 text-[12px] text-muted hover:text-text"
+          className="flex h-8 items-center rounded-md border border-border px-2.5 text-[13px] text-muted transition-colors hover:border-ink hover:text-text"
         >
           + New session
         </button>
@@ -1006,25 +1033,55 @@ export default function App() {
                     </p>
                   )}
 
-                  {visible.filter(Boolean).map((n) => (
-                    <Message
-                      key={n.id}
-                      node={n}
-                      color={colorFor(n.id)}
-                      streaming={streamingIds.has(n.id)}
-                      branchCount={branchesFrom(nodes, children, n.id).length}
-                      onBranch={startBranch}
-                      onClipExcerpt={clipExcerpt}
-                      onClipWhole={clipWhole}
-                      onToggleStar={toggleStar}
-                      onRegenerate={
-                        n.role === "assistant" && !streamingIds.has(n.id)
-                          ? regenerate
-                          : undefined
+                  {(() => {
+                    // A compare fan-out's sibling user nodes never sit
+                    // together in one root→tip path, so the first member we
+                    // hit renders the whole group as columns; the rest are
+                    // just skipped (they're shown inside that CompareRow).
+                    const skip = new Set<string>();
+                    return visible.filter(Boolean).map((n) => {
+                      if (skip.has(n.id)) return null;
+                      if (n.role === "user") {
+                        const group = compareGroupFor(nodes, children, n.id);
+                        if (group) {
+                          for (const m of group.members) skip.add(m.userId);
+                          return (
+                            <CompareRow
+                              key={`cmp:${n.id}`}
+                              group={group}
+                              nodes={nodes}
+                              colorFor={colorFor}
+                              streamingIds={streamingIds}
+                              onCancel={(id) => api.cancel(id)}
+                              onToggleStar={toggleStar}
+                              onSelectColumn={setFocusId}
+                            />
+                          );
+                        }
                       }
-                      onPrune={n.parent_id ? prune : undefined}
-                    />
-                  ))}
+                      return (
+                        <Message
+                          key={n.id}
+                          node={n}
+                          color={colorFor(n.id)}
+                          streaming={streamingIds.has(n.id)}
+                          thinking={thinkingById[n.id]}
+                          branchCount={branchesFrom(nodes, children, n.id).length}
+                          onBranch={startBranch}
+                          onClipExcerpt={clipExcerpt}
+                          onClipWhole={clipWhole}
+                          onToggleStar={toggleStar}
+                          onRegenerate={
+                            n.role === "assistant" && !streamingIds.has(n.id)
+                              ? regenerate
+                              : undefined
+                          }
+                          onPrune={n.parent_id ? prune : undefined}
+                          onCancel={(id) => api.cancel(id)}
+                        />
+                      );
+                    });
+                  })()}
                 </div>
               </div>
 
@@ -1064,6 +1121,8 @@ export default function App() {
                 busy={anyStreaming || !booted}
                 searchMode={searchMode}
                 onSearchModeChange={setSearchMode}
+                thinkMode={thinkMode}
+                onThinkModeChange={setThinkMode}
                 attachmentCount={attachments.length}
                 onAddFile={addFile}
                 status={status}
@@ -1101,6 +1160,8 @@ export default function App() {
             onOpenInChat={promote}
             onToggleStar={toggleStar}
             onToggleCollapse={toggleCollapse}
+            onCancel={(id) => api.cancel(id)}
+            streamingIds={streamingIds}
             onMove={move}
             onResetLayout={resetLayout}
             layoutEpoch={layoutEpoch}

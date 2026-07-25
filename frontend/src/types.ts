@@ -86,6 +86,9 @@ export interface Estimate {
 export interface ModelCapabilities {
   vision: boolean;
   tools: boolean;
+  /** The model can expose a separate reasoning stream — enables the think/fast
+   *  toggle and the thinking panel. */
+  thinking: boolean;
 }
 
 export interface ProviderInfo {
@@ -106,6 +109,10 @@ export interface ModelChoice {
 }
 
 export type SearchMode = "off" | "on";
+
+/** Whether a reasoning model should think before answering. "auto" lets the
+ *  model decide, "fast" skips reasoning for a quicker reply. */
+export type ThinkMode = "auto" | "fast";
 
 export type AttachmentPreview =
   | { type: "image"; data_uri: string }

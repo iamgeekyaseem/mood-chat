@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { pathToRoot, type ChildMap, type NodeMap } from "../tree";
+import { IconClose } from "./icons";
 
 interface Props {
   nodes: NodeMap;
@@ -139,9 +140,9 @@ export function DiffView({ nodes, children, isDark, initialLeft, onClose }: Prop
           <button
             onClick={onClose}
             aria-label="Close diff"
-            className="ml-auto text-[13px] text-faint hover:text-text"
+            className="ml-auto text-faint transition-transform hover:scale-110 hover:text-text active:scale-95"
           >
-            ✕
+            <IconClose className="h-4 w-4" />
           </button>
         </header>
 

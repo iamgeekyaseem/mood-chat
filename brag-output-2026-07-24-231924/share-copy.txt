@@ -1,0 +1,68 @@
+Branch — your conversation is a tree, not a line.
+
+═══════════════════════════════════════════════════════════════
+
+SHORT (X / social)
+
+Every chat app makes you pick: chase the tangent and lose the thread,
+or stay on track and drop the question.
+
+Branch doesn't. Highlight any phrase → a ⑂ branch spurs off. Ask three
+models at once. Diff two branches side by side. Run local, free, no key.
+
+Your conversation is a tree, not a line. ⑂
+
+───────────────────────────────────────────────────────────────
+
+MEDIUM (LinkedIn / Show HN)
+
+I kept losing good questions inside long chats — ask the aside, and the
+main thread is derailed; don't, and the question's gone.
+
+So I built Branch: a desktop chat client where a conversation is a tree,
+not a line.
+
+• Highlight any phrase and branch a side-conversation off it — the main
+  thread stays exactly where it was.
+• The whole conversation lives on one canvas, with a minimap — every
+  branch its own colour and its own dash pattern, never colour alone.
+• Ask one question to three models at once (claude-opus-4-8, gpt-5,
+  gemma3:4b) — each answer is its own branch, side by side.
+• Diff two branches to see exactly where they disagree.
+• Siblings share a cached prompt prefix (Anthropic), so the next branch
+  costs a fraction of the first.
+• No API key required: point it at a local model (gemma3:4b via Ollama)
+  and nothing leaves your machine — refresh the list anytime.
+• Full-text search across every message (⌘K), export a thread or the
+  whole tree, and clip any excerpt straight into per-session notes.
+
+Built with pywebview + a Python backend and a React/Tailwind front end.
+
+Your conversation is a tree, not a line.
+
+───────────────────────────────────────────────────────────────
+
+CAPTION (one-liner)
+
+Highlight a phrase, branch off it, compare models, diff the answers —
+the main thread never moves. Branch — your conversation is a tree, not
+a line. ⑂
+
+═══════════════════════════════════════════════════════════════
+
+Video: brag.mp4 (45s, 1920×1080, landscape) · Poster: brag.jpg
+
+Note on this run: this is the deeper cut of brag-output-2026-07-24-220625/
+(22s, hook-only). This run keeps that hook and adds four more real,
+shipped features with their own demo beats: the whole-conversation graph
+canvas + minimap, asking three models at once, diffing two branches, and
+the colour/dash-pattern law that keeps branches distinguishable without
+relying on colour alone — plus quick hits for search, export/import, and
+notes-clipping. Every graph/flow diagram (main thread, graph canvas,
+multi-model fan-out, colour law) is rendered in Manim with connectors
+anchored to real card mobjects (manim/branch_theme.py, main_thread.py,
+graph_canvas.py, multi_model.py, color_law.py) — never a hand-typed CSS
+rotate(). All facts (model IDs, Anthropic-only caching, local/no-API-key
+Ollama) are verified against backend/providers/*.py and ROADMAP.md; no
+unshipped feature is shown. This is a separate, independent run —
+brag-output-2026-07-24-220625/ and all earlier runs are untouched.

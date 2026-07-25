@@ -1,7 +1,7 @@
 # Roadmap
 
 Ideas worth building, ordered by how much they'd change daily use. Nothing here
-is committed — it's a menu.
+is committed — it's a menu. 
 
 Each item notes what it costs to build, because a few of these are an afternoon
 and a few are a rewrite.
@@ -99,13 +99,8 @@ Half-building it against a model that isn't there would be worse than leaving it
 clearly deferred: pull an embedding model (e.g. `nomic-embed-text`) first, then
 this becomes tractable. *Large.*
 
-**Agentic branches.** A branch that runs tools and reports back, rather than just
-answering. This rethinks what a node is — a node would need a tool-call
-transcript, not just a message — and wants the tool-runner infrastructure the
-app doesn't yet have. Deferred as a genuine design change rather than a feature
-to bolt on. *Large.*
-
 **Live collaboration.** Two people on one canvas. Almost certainly not worth it
+
 for a personal tool, listed for completeness. *Large. (Intentionally not built.)*
 
 ---

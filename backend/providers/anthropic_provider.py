@@ -32,6 +32,10 @@ class AnthropicProvider(Provider):
     def models(self) -> list[str]:
         return MODELS
 
+    def supports_thinking(self, model: str) -> bool:
+        # Every current Claude model reasons; the toggle chooses whether to.
+        return True
+
     async def stream(
         self,
         model: str,
@@ -39,13 +43,17 @@ class AnthropicProvider(Provider):
         system: Optional[str] = None,
         max_tokens: int = 16000,
         search_mode: str = "off",
+        think_mode: str = "auto",
     ) -> AsyncIterator[StreamChunk]:
         kwargs: dict = {
             "model": model,
             "max_tokens": max_tokens,
             "messages": messages,
-            "thinking": {"type": "adaptive", "display": "summarized"},
         }
+        # Fast mode turns extended thinking off entirely; otherwise Claude
+        # decides adaptively how much to think and streams a summary of it.
+        if think_mode != "fast":
+            kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
         if system:
             kwargs["system"] = system
         if search_mode == "on":

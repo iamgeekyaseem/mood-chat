@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Branch — launch (deep cut)</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #171614; }
+      :root {
+        --bg: #171614;
+        --surface: #1f1e1b;
+        --user: #1c2027;
+        --user-border: #333d4a;
+        --assist: #221f19;
+        --assist-border: #3d3529;
+        --text: #edeae4;
+        --muted: #9a948b;
+        --faint: #6f6a62;
+        --border: #34322d;
+        --ink: #edeae4;
+        --on-ink: #171614;
+        --blue: #3987e5;
+        --amber: #c98500;
+        --magenta: #d55181;
+        --green: #34a853;
+        --star: #d8ab3c;
+        --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --mono: ui-monospace, "SF Mono", Menlo, monospace;
+      }
+      body { font-family: var(--sans); color: var(--text); }
+
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+      .clip { position: absolute; inset: 0; }
+      .bg { position: absolute; inset: 0; background: var(--bg); }
+      .bg::after {
+        content: ""; position: absolute; inset: 0;
+        background-image: radial-gradient(#2a2824 1.4px, transparent 1.4px);
+        background-size: 34px 34px; opacity: 0.5;
+      }
+      .wrap { position: absolute; inset: 0; }
+
+      .label { font-size: 20px; letter-spacing: 0.14em; text-transform: uppercase; color: #b0a99f; font-weight: 600; }
+      .bubble { border: 1px solid; border-radius: 16px; padding: 26px 30px; font-size: 34px; line-height: 1.5; }
+      .bubble.user { background: var(--user); border-color: var(--user-border); }
+      .bubble.assist { background: var(--assist); border-color: var(--assist-border); }
+
+      .hl { background: rgba(57,135,229,0.24); border-radius: 6px; padding: 2px 8px; color: var(--text); box-decoration-break: clone; }
+      .selbar { position: absolute; width: 4px; background: var(--blue); border-radius: 2px; opacity: 0.9; }
+
+      .chip {
+        display: inline-flex; align-items: center; gap: 10px;
+        background: var(--ink); color: var(--on-ink);
+        font-size: 26px; font-weight: 600; padding: 12px 20px; border-radius: 12px;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+        font-family: var(--sans);
+      }
+      .chip.ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: none; }
+      .caption { font-size: 40px; font-weight: 500; color: var(--text); letter-spacing: -0.01em; }
+      .caption.small { font-size: 32px; }
+      .caption .dim { color: var(--muted); }
+
+      .node {
+        border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+        padding: 18px 22px; width: 360px;
+      }
+      .node .head { display: flex; align-items: center; gap: 12px; font-size: 18px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
+      .node .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+      .node .body { font-size: 26px; color: var(--text); line-height: 1.4; }
+      .node.user { background: var(--user); }
+      .node.assist { background: var(--assist); }
+      .node.branch { border-left-width: 4px; }
+
+      .meter {
+        display: inline-flex; align-items: center; gap: 18px;
+        border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+        padding: 16px 26px; font-family: var(--mono); font-size: 34px; color: var(--text);
+      }
+      .meter .num { min-width: 150px; text-align: right; }
+      .tag-cached {
+        display: inline-flex; align-items: center; gap: 8px;
+        color: var(--star); font-size: 26px; font-weight: 600;
+        border: 1px solid rgba(216,171,60,0.4); border-radius: 999px; padding: 6px 14px;
+      }
+
+      .picker {
+        width: 560px; border: 1px solid var(--border); border-radius: 16px;
+        background: var(--surface); box-shadow: 0 22px 60px rgba(0,0,0,0.5);
+        overflow: hidden;
+      }
+      .picker .grouplabel {
+        font-size: 18px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--faint); font-weight: 700; padding: 16px 24px 8px;
+        display: flex; align-items: center; justify-content: space-between;
+      }
+      .picker .refresh {
+        font-size: 16px; color: var(--blue); font-weight: 600; letter-spacing: normal; text-transform: none;
+      }
+      .picker .opt {
+        display: flex; align-items: center; gap: 14px;
+        font-size: 30px; color: var(--text); padding: 14px 24px;
+      }
+      .picker .opt .mono { font-family: var(--mono); }
+      .picker .opt.sel { background: rgba(57,135,229,0.14); }
+      .picker .opt .check { margin-left: auto; color: var(--blue); font-size: 28px; }
+      .picker .divider { height: 1px; background: var(--border); }
+      .local-note {
+        display: inline-flex; align-items: center; gap: 12px;
+        font-size: 30px; color: var(--muted); margin-top: 30px;
+      }
+      .local-note .free { color: var(--green); font-weight: 600; }
+
+      /* diff view (scene 5) */
+      .diff-panel {
+        width: 620px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface);
+        padding: 26px 30px; font-family: var(--mono); font-size: 24px; line-height: 1.7; color: var(--text);
+      }
+      .diff-panel .head { font-size: 18px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 14px; }
+      .diff-add { background: rgba(52,168,83,0.22); border-radius: 4px; padding: 1px 6px; }
+      .diff-del { background: rgba(213,81,129,0.16); border-radius: 4px; padding: 1px 6px; color: var(--muted); text-decoration: line-through; }
+      .diff-chip {
+        position: absolute; display: inline-flex; align-items: center; gap: 10px;
+        background: var(--ink); color: var(--on-ink); font-weight: 700; font-size: 24px;
+        padding: 10px 18px; border-radius: 999px; box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+      }
+
+      /* search palette (scene 8a) */
+      .search-box {
+        width: 760px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface);
+        box-shadow: 0 22px 60px rgba(0,0,0,0.5); overflow: hidden;
+      }
+      .search-box .field {
+        display: flex; align-items: center; gap: 16px; padding: 20px 26px;
+        border-bottom: 1px solid var(--border); font-size: 30px; color: var(--text);
+      }
+      .search-box .field .glyph { color: var(--muted); font-size: 28px; }
+      .search-box .row { display: flex; align-items: center; gap: 14px; padding: 16px 26px; font-size: 24px; color: var(--muted); }
+      .search-box .row .match { color: var(--text); background: rgba(57,135,229,0.24); border-radius: 4px; padding: 1px 6px; }
+
+      /* export/import chips (scene 8b) */
+      .io-chip {
+        display: inline-flex; align-items: center; gap: 14px;
+        border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+        padding: 18px 28px; font-size: 28px; color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+      }
+      .io-chip .glyph { font-size: 30px; color: var(--blue); }
+
+      /* notes clip (scene 8c) */
+      .notes-card {
+        width: 640px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface);
+        padding: 24px 28px;
+      }
+      .notes-card .head { font-size: 18px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
+      .notes-card .excerpt { font-size: 26px; color: var(--text); line-height: 1.45; border-left: 3px solid var(--blue); padding-left: 18px; }
+      .notes-card .clipped-tag {
+        display: inline-flex; align-items: center; gap: 8px; margin-top: 16px;
+        color: var(--blue); font-size: 20px; font-weight: 600;
+      }
+
+      .wordmark { font-size: 138px; font-weight: 700; letter-spacing: -0.03em; color: var(--text); }
+      .wordmark .cut { color: var(--blue); }
+      .tagline { font-size: 46px; color: var(--muted); font-weight: 400; letter-spacing: -0.01em; }
+      .tagline .strong { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="45">
+
+      <!-- ===================== Scene 1 — hook: highlight & branch chip ===================== -->
+      <section id="s1" class="clip" data-start="0" data-duration="3.6" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s1w" class="wrap">
+          <div style="position:absolute; left:410px; top:214px; width:1100px;">
+            <div id="s1-ulabel" class="label" style="margin-bottom:14px;">You</div>
+            <div id="s1-user" class="bubble user" style="margin-bottom:34px;">explain regression to me</div>
+            <div id="s1-alabel" class="label" style="margin-bottom:14px;">Claude&nbsp;Opus&nbsp;4.8</div>
+            <div id="s1-assist" class="bubble assist">
+              A regression fits a line to your data; the
+              <span id="s1-hl" class="hl">p&nbsp;value</span> tells you whether the result is
+              statistically significant.
+            </div>
+          </div>
+          <div id="s1-sel" class="selbar" style="left:740px; top:566px; height:44px;"></div>
+          <div id="s1-chip" class="chip" style="position:absolute; left:735px; top:590px;">⑂ Branch from here</div>
+          <div id="s1-hook" class="caption" style="position:absolute; left:410px; top:820px;">
+            Highlight any phrase. <span class="dim">Branch off it.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 2 — the main thread never moves =====================
+           Diagram in Manim (assets/video/main-thread.webm) — connector anchored to the
+           real card mobjects (manim/main_thread.py), never a hand-typed transform. -->
+      <section id="s2" class="clip" data-start="3.4" data-duration="4.35" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s2w" class="wrap">
+          <div id="s2-cap" class="caption" style="position:absolute; left:250px; top:900px;">
+            The main thread <span class="dim">never moves.</span>
+          </div>
+        </div>
+      </section>
+      <video id="s2-diagram" class="clip" data-start="3.4" data-duration="4.0" data-track-index="5"
+        data-media-start="0" muted playsinline
+        style="position:absolute; inset:0; width:1920px; height:1080px; object-fit:contain;"
+        src="assets/video/main-thread.webm"></video>
+
+      <!-- ===================== Scene 3 — every branch, one canvas =====================
+           Diagram in Manim (assets/video/graph-canvas.webm) — 4 colour-coded branches,
+           each connector its own dash pattern, plus a minimap thumbnail; every connector
+           anchored to real card mobjects (manim/graph_canvas.py). -->
+      <section id="s3" class="clip" data-start="7.6" data-duration="4.5" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s3w" class="wrap">
+          <div id="s3-cap" class="caption" data-layout-allow-occlusion style="position:absolute; left:150px; right:150px; top:955px; text-align:center;">
+            Every branch, <span class="dim">one canvas.</span>
+          </div>
+        </div>
+      </section>
+      <video id="s3-diagram" class="clip" data-start="7.6" data-duration="4.0" data-track-index="6"
+        data-media-start="0" muted playsinline
+        style="position:absolute; inset:0; width:1920px; height:1080px; object-fit:contain;"
+        src="assets/video/graph-canvas.webm"></video>
+
+      <!-- ===================== Scene 4 — ask three models at once =====================
+           Diagram in Manim (assets/video/multi-model.webm) — question fans into three
+           model branches; connectors anchored (manim/multi_model.py). Caption is the
+           app's own Composer.tsx compare-tooltip, verbatim. -->
+      <section id="s4" class="clip" data-start="11.7" data-duration="5.0" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s4w" class="wrap">
+          <div id="s4-cap" class="caption small" data-layout-allow-occlusion style="position:absolute; left:150px; right:150px; top:940px; text-align:center;">
+            "Send this question to several models at once <span class="dim">— each answer becomes its own branch."</span>
+          </div>
+        </div>
+      </section>
+      <video id="s4-diagram" class="clip" data-start="11.7" data-duration="4.0" data-track-index="7"
+        data-media-start="0" muted playsinline
+        style="position:absolute; inset:0; width:1920px; height:1080px; object-fit:contain;"
+        src="assets/video/multi-model.webm"></video>
+
+      <!-- ===================== Scene 5 — diff two branches (plain HTML, no connector) ===================== -->
+      <section id="s5" class="clip" data-start="16.5" data-duration="4.3" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s5w" class="wrap">
+          <div id="s5-a" class="diff-panel" style="position:absolute; left:250px; top:300px;">
+            <div class="head">⑂ branch A · gpt-5</div>
+            <div>A p-value is the probability of a result this extreme</div>
+            <div>if <span class="diff-del">the null hypothesis were true</span>.</div>
+          </div>
+          <div id="s5-b" class="diff-panel" style="position:absolute; left:1050px; top:300px; border-color:var(--blue);">
+            <div class="head">⑂ branch B · claude-opus-4-8</div>
+            <div>A p-value is the probability of a result this extreme</div>
+            <div>if <span class="diff-add">nothing were going on</span>.</div>
+          </div>
+          <div id="s5-chip" class="diff-chip" style="left:890px; top:470px;">⚖ diff</div>
+          <div id="s5-cap" class="caption" style="position:absolute; left:0; right:0; top:760px; text-align:center;">
+            "Compare two branches <span class="dim">side by side."</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 6 — cheaper by design (cached ticks down) ===================== -->
+      <section id="s6" class="clip" data-start="20.6" data-duration="4.0" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s6w" class="wrap">
+          <div class="node branch" style="position:absolute; left:360px; top:330px; width:420px; border-color:var(--blue); border-left-color:var(--blue);">
+            <div class="head"><span class="dot" style="background:var(--blue)"></span>⑂ first branch</div>
+            <div class="body" style="font-family:var(--mono); font-size:24px; color:var(--muted);">↑ 1,280 tokens</div>
+          </div>
+          <div id="s6-sib" class="node branch" style="position:absolute; left:1140px; top:330px; width:420px; border-color:var(--amber); border-left-color:var(--amber);">
+            <div class="head"><span class="dot" style="background:var(--amber)"></span>⑂ sibling branch</div>
+            <div class="body" style="font-family:var(--mono); font-size:24px; color:var(--muted);"><span id="s6-num">1,280</span> → <span id="s6-cached-num" style="color:var(--star);">128</span></div>
+          </div>
+          <div id="s6-tag" class="tag-cached" style="position:absolute; left:1360px; top:470px;">✓ cached · 0.1×</div>
+
+          <div id="s6-cap" class="caption" style="position:absolute; left:0; right:0; top:640px; text-align:center;">
+            Siblings share a cached prefix. <span class="dim">Anthropic caching, on by default.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 7 — no API key: local model ===================== -->
+      <section id="s7" class="clip" data-start="24.4" data-duration="4.0" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s7w" class="wrap">
+          <div id="s7-picker" class="picker" style="position:absolute; left:50%; top:230px; transform:translateX(-50%);">
+            <div class="grouplabel">anthropic</div>
+            <div class="opt"><span class="mono">claude-opus-4-8</span></div>
+            <div class="divider"></div>
+            <div class="grouplabel">openai</div>
+            <div class="opt"><span class="mono">gpt-5</span></div>
+            <div class="divider"></div>
+            <div class="grouplabel" style="color:var(--green);">ollama · local <span id="s7-refresh" class="refresh">↻ Refresh</span></div>
+            <div class="opt sel"><span class="mono">gemma3:4b</span><span class="check">✓</span></div>
+          </div>
+          <div id="s7-note" class="local-note" style="position:absolute; left:0; right:0; top:710px; justify-content:center;">
+            <span class="free">Free, fully local.</span> No API key — nothing leaves your machine.
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 8a — search everything (⌘K) ===================== -->
+      <section id="s8a" class="clip" data-start="28.2" data-duration="2.3" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s8aw" class="wrap">
+          <div id="s8a-box" class="search-box" style="position:absolute; left:50%; top:280px; transform:translateX(-50%);">
+            <div class="field"><span class="glyph">⌕</span><span>p value <span style="color:var(--faint)">— search messages…</span></span></div>
+            <div class="row">explain regression to me · the <span class="match">p value</span> tells you…</div>
+            <div class="row">residuals · show me the plot of <span class="match">p value</span> vs fit</div>
+          </div>
+          <div id="s8a-cap" class="caption" style="position:absolute; left:0; right:0; top:650px; text-align:center;">
+            Search everything. <span class="dim">⌘K</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 8b — export / import ===================== -->
+      <section id="s8b" class="clip" data-start="30.3" data-duration="2.3" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s8bw" class="wrap">
+          <div id="s8b-e" class="io-chip" style="position:absolute; left:560px; top:420px;"><span class="glyph">⭳</span> Export as Markdown</div>
+          <div id="s8b-i" class="io-chip" style="position:absolute; left:1060px; top:420px;"><span class="glyph">⭱</span> Import .branch.json</div>
+          <div id="s8b-cap" class="caption" style="position:absolute; left:0; right:0; top:650px; text-align:center;">
+            Export a thread, <span class="dim">or the whole tree.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 8c — clip into notes ===================== -->
+      <section id="s8c" class="clip" data-start="32.4" data-duration="2.2" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s8cw" class="wrap">
+          <div id="s8c-card" class="notes-card" style="position:absolute; left:50%; top:300px; transform:translateX(-50%);">
+            <div class="head">Notes for this session</div>
+            <div class="excerpt">"…the p value tells you whether it's significant."</div>
+            <div class="clipped-tag">✓ 1 excerpt clipped from this message</div>
+          </div>
+          <div id="s8c-cap" class="caption" style="position:absolute; left:0; right:0; top:650px; text-align:center;">
+            Clip anything <span class="dim">into notes.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 9 — every branch has a colour and a shape =====================
+           Diagram in Manim (assets/video/color-law.webm) — same anchored-connector
+           construction as scene 3, relabelled as an explicit legend (manim/color_law.py). -->
+      <section id="s9" class="clip" data-start="34.4" data-duration="5.3" data-track-index="1">
+        <div class="bg"></div>
+        <div id="s9w" class="wrap">
+          <div id="s9-cap" class="caption small" data-layout-allow-occlusion style="position:absolute; left:150px; right:150px; top:955px; text-align:center;">
+            Every branch has a colour and a shape <span class="dim">— never colour alone.</span>
+          </div>
+        </div>
+      </section>
+      <video id="s9-diagram" class="clip" data-start="34.4" data-duration="3.8" data-track-index="8"
+        data-media-start="0" muted playsinline
+        style="position:absolute; inset:0; width:1920px; height:1080px; object-fit:contain;"
+        src="assets/video/color-law.webm"></video>
+
+      <!-- ===================== Scene 10 — punchline / wordmark ===================== -->
+      <section id="s10" class="clip" data-start="39.3" data-duration="5.7" data-track-index="2">
+        <div class="bg"></div>
+        <div id="s10w" class="wrap">
+          <div id="s10-mark" class="wordmark" style="position:absolute; left:0; right:0; top:400px; text-align:center;">Branch<span class="cut">⑂</span></div>
+          <div id="s10-tag" class="tagline" style="position:absolute; left:0; right:0; top:590px; text-align:center;">Your conversation is a <span class="strong">tree</span>, not a line.</div>
+        </div>
+      </section>
+
+      <!-- audio bed -->
+      <audio id="music" data-start="0" data-duration="45" data-track-index="9" data-volume="0.5" src="assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      const E = "power3.out";
+      const EO = "power2.out";
+
+      // ---- Scene 1 (0.0–3.6): highlight & branch chip ----
+      tl.fromTo("#s1w", { opacity: 0 }, { opacity: 1, duration: 0.35, ease: EO }, 0.05);
+      tl.from("#s1-ulabel", { y: 18, opacity: 0, duration: 0.35, ease: E }, 0.18);
+      tl.from("#s1-user", { y: 22, opacity: 0, duration: 0.4, ease: E }, 0.3);
+      tl.from("#s1-alabel", { y: 18, opacity: 0, duration: 0.35, ease: E }, 0.62);
+      tl.from("#s1-assist", { y: 22, opacity: 0, duration: 0.45, ease: E }, 0.78);
+      tl.fromTo("#s1-sel", { width: 4, x: 0 }, { width: 150, duration: 0.4, ease: "power1.inOut" }, 1.35);
+      tl.from("#s1-hl", { backgroundColor: "rgba(57,135,229,0)", duration: 0.4, ease: EO }, 1.45);
+      tl.to("#s1-sel", { opacity: 0, duration: 0.25, ease: EO }, 1.85);
+      tl.from("#s1-chip", { scale: 0.72, opacity: 0, y: 6, duration: 0.3, ease: "back.out(1.4)" }, 2.0);
+      tl.from("#s1-hook", { y: 22, opacity: 0, duration: 0.45, ease: E }, 2.5);
+      tl.to("#s1w", { opacity: 0, duration: 0.3, ease: "power2.in" }, 3.3);
+
+      // ---- Scene 2 (3.4–7.75): the main thread never moves ----
+      tl.fromTo("#s2w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 3.45);
+      tl.fromTo("#s2-diagram", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 3.45);
+      tl.from("#s2-cap", { y: 22, opacity: 0, duration: 0.5, ease: E }, 5.85);
+      tl.to("#s2w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 7.4);
+      tl.to("#s2-diagram", { opacity: 0, duration: 0.35, ease: "power2.in" }, 7.4);
+
+      // ---- Scene 3 (7.6–12.1): every branch, one canvas ----
+      tl.fromTo("#s3w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 7.65);
+      tl.fromTo("#s3-diagram", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 7.65);
+      tl.from("#s3-cap", { y: 20, opacity: 0, duration: 0.5, ease: E }, 10.3);
+      tl.to("#s3w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 11.75);
+      tl.to("#s3-diagram", { opacity: 0, duration: 0.35, ease: "power2.in" }, 11.75);
+
+      // ---- Scene 4 (11.7–16.7): ask three models at once ----
+      tl.fromTo("#s4w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 11.75);
+      tl.fromTo("#s4-diagram", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 11.75);
+      tl.from("#s4-cap", { y: 20, opacity: 0, duration: 0.5, ease: E }, 14.6);
+      tl.to("#s4w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 16.35);
+      tl.to("#s4-diagram", { opacity: 0, duration: 0.35, ease: "power2.in" }, 16.35);
+
+      // ---- Scene 5 (16.5–20.8): diff two branches ----
+      tl.fromTo("#s5w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 16.55);
+      tl.from("#s5-a", { x: -24, opacity: 0, duration: 0.5, ease: E }, 16.75);
+      tl.from("#s5-b", { x: 24, opacity: 0, duration: 0.5, ease: E }, 16.9);
+      tl.from("#s5-chip", { scale: 0.7, opacity: 0, duration: 0.3, ease: "back.out(1.4)" }, 17.35);
+      tl.from("#s5-cap", { y: 20, opacity: 0, duration: 0.5, ease: E }, 17.9);
+      tl.to("#s5w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 20.45);
+
+      // ---- Scene 6 (20.6–24.6): cheaper by design ----
+      tl.fromTo("#s6w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 20.65);
+      tl.from("#s6-cap", { y: 18, opacity: 0, duration: 0.5, ease: E }, 20.85);
+      const counter = { v: 1280 };
+      const numEl = document.getElementById("s6-cached-num");
+      tl.set("#s6-cached-num", { textContent: "1,280" }, 21.2);
+      tl.to(counter, {
+        v: 128, duration: 0.9, ease: "power2.inOut",
+        onUpdate: () => { if (numEl) numEl.textContent = Math.round(counter.v).toLocaleString(); },
+      }, 21.25);
+      tl.from("#s6-tag", { scale: 0.9, opacity: 0, duration: 0.4, ease: EO }, 22.15);
+      tl.to("#s6w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 24.25);
+
+      // ---- Scene 7 (24.4–28.4): no API key, local model ----
+      tl.fromTo("#s7w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 24.45);
+      tl.from("#s7-picker", { y: 20, opacity: 0, duration: 0.5, ease: E }, 24.55);
+      tl.from("#s7-note", { y: 18, opacity: 0, duration: 0.5, ease: E }, 24.95);
+      tl.from("#s7-refresh", { opacity: 0, duration: 0.3, ease: EO }, 25.3);
+      tl.to("#s7w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 28.05);
+
+      // ---- Scene 8a (28.2–30.5): search everything ----
+      tl.fromTo("#s8aw", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: EO }, 28.25);
+      tl.from("#s8a-box", { y: 16, opacity: 0, duration: 0.35, ease: E }, 28.35);
+      tl.from("#s8a-cap", { y: 16, opacity: 0, duration: 0.35, ease: E }, 28.75);
+      tl.to("#s8aw", { opacity: 0, duration: 0.25, ease: "power2.in" }, 30.15);
+
+      // ---- Scene 8b (30.3–32.6): export / import ----
+      tl.fromTo("#s8bw", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: EO }, 30.35);
+      tl.from("#s8b-e", { y: 16, opacity: 0, duration: 0.35, ease: E }, 30.45);
+      tl.from("#s8b-i", { y: 16, opacity: 0, duration: 0.35, ease: E }, 30.6);
+      tl.from("#s8b-cap", { y: 16, opacity: 0, duration: 0.35, ease: E }, 30.9);
+      tl.to("#s8bw", { opacity: 0, duration: 0.25, ease: "power2.in" }, 32.25);
+
+      // ---- Scene 8c (32.4–34.6): clip into notes ----
+      tl.fromTo("#s8cw", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: EO }, 32.45);
+      tl.from("#s8c-card", { y: 16, opacity: 0, duration: 0.35, ease: E }, 32.55);
+      tl.from("#s8c-cap", { y: 16, opacity: 0, duration: 0.35, ease: E }, 32.95);
+      tl.to("#s8cw", { opacity: 0, duration: 0.3, ease: "power2.in" }, 34.25);
+
+      // ---- Scene 9 (34.4–39.7): every branch has a colour and a shape ----
+      tl.fromTo("#s9w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 34.45);
+      tl.fromTo("#s9-diagram", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 34.45);
+      tl.from("#s9-cap", { y: 20, opacity: 0, duration: 0.5, ease: E }, 36.7);
+      tl.to("#s9w", { opacity: 0, duration: 0.35, ease: "power2.in" }, 39.35);
+      tl.to("#s9-diagram", { opacity: 0, duration: 0.35, ease: "power2.in" }, 39.35);
+
+      // ---- Scene 10 (39.3–45.0): punchline ----
+      tl.fromTo("#s10w", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: EO }, 39.4);
+      tl.from("#s10-mark", { y: 20, opacity: 0, duration: 0.6, ease: E }, 39.55);
+      tl.from("#s10-tag", { y: 18, opacity: 0, duration: 0.6, ease: E }, 40.05);
+      tl.to("#music", { volume: 0, duration: 1.3, ease: "power2.in" }, 43.6);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
