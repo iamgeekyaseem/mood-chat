@@ -1,3 +1,5 @@
+<img src="frontend/public/logo.png" alt="Branch logo" width="120">
+
 # Branch ⑂
 
 **A chat client where the conversation is a tree, not a line.**
@@ -149,7 +151,7 @@ which runs on every `v*` tag push (or manually via
 **Actions → Build desktop app → Run workflow**) and builds natively on a
 macOS and a Windows runner, since PyInstaller can't cross-compile. The app
 icon (`packaging/icons/Branch.icns` / `.ico`) is generated from
-[`frontend/public/favicon.svg`](frontend/public/favicon.svg).
+[`frontend/public/logo.png`](frontend/public/logo.png).
 
 ---
 
@@ -476,7 +478,7 @@ frontend/src/
   tree.ts       client mirror of traversal, plus minimap layout
   useTheme.ts   light/dark resolution (the two palettes are separate sets)
   components/   Minimap, Message, Composer, BranchRail, GraphView, NotesView
-packaging/icons/  Branch.icns / Branch.ico, generated from favicon.svg
+packaging/icons/  Branch.icns / Branch.ico, generated from logo.png
 .github/workflows/build.yml   builds the macOS .dmg and Windows .exe
 ```
 
